@@ -29,7 +29,7 @@ const RADIUS = {
   bl: '50%',
   br: '0 50% 50% 50%', // petal, sharp corner to the centre (top-left)
 } as const;
-const COLOUR = { tl: 'var(--need)', tr: 'var(--mark-white)', bl: 'var(--need)', br: 'var(--mark-white)' } as const;
+const COLOUR = { tl: 'var(--brand-red)', tr: 'var(--mark-white)', bl: 'var(--brand-red)', br: 'var(--mark-white)' } as const;
 const SMALL = { tl: false, tr: true, bl: true, br: false } as const;
 
 type Slot = keyof typeof RADIUS;

@@ -9,6 +9,7 @@ import { Button, Card, ErrorNote, Field, Input, Loading, PageHeader, SectionTitl
 
 type Form = Record<string, string>;
 const FIELDS: { key: string; label: string; hint: string; unit: '%' | '₦' | '×'; group: string }[] = [
+  { key: 'approvalThreshold', label: 'Second approval above', hint: 'Payments larger than this need a second person to approve', unit: '₦', group: 'Approvals' },
   { key: 'foodCommissionPercent', label: 'Vendor commission', hint: 'Taken from what each vendor earns on an order', unit: '%', group: 'DezenFoods' },
   { key: 'foodServiceFeePercent', label: 'Buyer service fee', hint: 'Added to the buyer’s bill', unit: '%', group: 'DezenFoods' },
   { key: 'expressPlatformFeePercent', label: 'Platform fee', hint: 'Taken from the fare before the rider is paid', unit: '%', group: 'DezenExpress' },

@@ -77,7 +77,7 @@ export function Table<T>({
                 return (
                   <li key={rowKey(row)}>
                     {link ? (
-                      <Link to={link} className="block active:bg-raised">
+                      <Link to={link} data-nav-row className="block active:bg-raised focus-visible:bg-raised">
                         {body}
                       </Link>
                     ) : (
@@ -99,7 +99,7 @@ export function Table<T>({
                       scope="col"
                       className={`whitespace-nowrap px-4 py-3 text-[12px] font-medium text-ink-3 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}
                     >
-                      {c.header}
+                      {c.header || <span className="sr-only">Actions</span>}
                     </th>
                   ))}
                 </tr>
@@ -112,7 +112,7 @@ export function Table<T>({
                       {columns.map((c, i) => (
                         <td key={c.header} className={`px-4 py-3.5 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
                           {link && i === 0 ? (
-                            <Link to={link} className="font-semibold underline-offset-4 hover:underline">
+                            <Link to={link} data-nav-row className="font-semibold underline-offset-4 hover:underline">
                               {c.cell(row)}
                             </Link>
                           ) : (

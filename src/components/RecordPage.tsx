@@ -40,7 +40,7 @@ export function RecordPage({
 }) {
   return (
     <>
-      <Link to={back} className="mb-5 inline-flex items-center gap-1.5 text-[13px] text-ink-3 transition-colors hover:text-ink">
+      <Link to={back} data-nav-back className="mb-5 inline-flex items-center gap-1.5 text-[13px] text-ink-3 transition-colors hover:text-ink">
         <FiArrowLeft aria-hidden /> {backLabel}
       </Link>
       {loading ? (

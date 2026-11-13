@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { MoneyReceipt } from '../store/types';
-import { Settle } from './brand';
+import { useOnline } from '../lib/device';
+import { Settle, StatusShape } from './brand';
 import { Button, CodeInput, ErrorNote, Field, Input, Money } from './ui';
 
 /**
@@ -135,8 +136,9 @@ export function MoneySheet({
     }
   }, [open]);
 
+  const online = useOnline();
   const amountOk = Number(typed.replace(/[,\s₦]/g, '')) === amount;
-  const ready = amountOk && reason.trim().length > 2 && code.length === 6 && extraReady;
+  const ready = amountOk && reason.trim().length > 2 && code.length === 6 && extraReady && online;
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -156,7 +158,7 @@ export function MoneySheet({
     return (
       <Dialog
         open={open}
-        title={done.state === 'sent' ? 'Sent' : 'Recorded'}
+        title={done.state === 'sent' ? 'Sent' : done.state === 'awaiting_approval' ? 'Waiting for a second approval' : 'Recorded'}
         onClose={onClose}
         footer={
           <div className="flex flex-wrap justify-end gap-2">
@@ -172,14 +174,19 @@ export function MoneySheet({
         }
       >
         <div aria-live="polite" className="flex flex-col items-start gap-5">
-          <Settle size={44} />
+          {done.state === 'awaiting_approval' ? <StatusShape shape="ring" tone="waiting" size={44} /> : <Settle size={44} />}
           <div>
             <p className="font-mono text-3xl font-semibold tracking-tight">
               <Money amount={done.amount} currency={done.currency} />
             </p>
             <p className="mt-1 text-[15px] text-ink-2">
-              {done.state === 'sent' ? 'sent to' : 'recorded for'} <span className="font-semibold text-ink">{done.recipient}</span>
+              {done.state === 'sent' ? 'sent to' : done.state === 'awaiting_approval' ? 'for' : 'recorded for'} <span className="font-semibold text-ink">{done.recipient}</span>
             </p>
+            {done.state === 'awaiting_approval' && (
+              <p className="mt-3 max-w-[40ch] text-sm text-ink-2">
+                This is above the amount one person can move. Nothing has been sent yet: a colleague with refund and payout access must approve it.
+              </p>
+            )}
           </div>
           <dl className="grid w-full grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 border-t border-line pt-4 text-sm">
             <dt className="text-ink-3">Reference</dt>
@@ -227,6 +234,7 @@ export function MoneySheet({
           {irreversible && <p className="font-semibold text-ink">This cannot be undone.</p>}
         </div>
         {children}
+        {!online && <ErrorNote>You're offline. Nothing can be sent until you're back; nothing is saved to send later.</ErrorNote>}
         <Field
           label="Type the amount to confirm"
           hint={!typed ? `Type ${amount.toLocaleString('en-NG')} exactly, without the currency.` : amountOk ? 'Matches.' : 'That does not match the amount above.'}

@@ -9,7 +9,10 @@ import { API_URL, USE_SAMPLE_DATA } from '../lib/config';
 import { sampleBaseQuery } from '../mocks/backend';
 import { signedOut } from './session';
 import type {
+  Approval,
   AuditEvent,
+  Claim,
+  ClaimKind,
   Booking,
   BookingDetail,
   DeliveryProvider,
@@ -91,6 +94,7 @@ const TAGS = [
   'Settings',
   'Staff',
   'Audit',
+  'Approvals',
 ] as const;
 
 export const api = createApi({
@@ -115,6 +119,33 @@ export const api = createApi({
     }),
     me: b.query<Omit<Session, 'token'>, void>({ query: () => '/admin/auth/me', transformResponse: unwrap }),
     signOut: b.mutation<unknown, void>({ query: () => ({ url: '/admin/auth/sign-out', method: 'POST' }) }),
+
+    // ── claims: who is handling what ──
+    claim: b.mutation<Claim, { kind: ClaimKind; id: string; takeOver?: boolean }>({
+      query: (body) => ({ url: '/admin/claims', method: 'POST', body }),
+      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Audit'],
+      transformResponse: unwrap,
+    }),
+    release: b.mutation<unknown, { kind: ClaimKind; id: string }>({
+      query: ({ kind, id }) => ({ url: `/admin/claims/${kind}/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Audit'],
+    }),
+
+    // ── second approver ──
+    approvals: b.query<Page<Approval>, PageArgs>({
+      query: (params) => ({ url: '/admin/approvals', params }),
+      providesTags: ['Approvals'],
+      transformResponse: unwrap,
+    }),
+    approve: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
+      query: ({ id, amount, code }) => ({ url: `/admin/approvals/${id}/approve`, method: 'POST', body: { amount }, headers: withCode(code) }),
+      invalidatesTags: ['Approvals', 'Queues', 'FoodOrders', 'Bookings', 'Withdrawals', 'Riders', 'ShopDisputes', 'Audit'],
+      transformResponse: unwrap,
+    }),
+    decline: b.mutation<unknown, { id: string; reason: string }>({
+      query: ({ id, reason }) => ({ url: `/admin/approvals/${id}/decline`, method: 'POST', body: { reason } }),
+      invalidatesTags: ['Approvals', 'Queues', 'Audit'],
+    }),
 
     // ── home ──
     queues: b.query<QueueItem[], void>({ query: () => '/admin/queues', providesTags: ['Queues'], transformResponse: unwrap }),
@@ -146,7 +177,7 @@ export const api = createApi({
     retryFoodMoney: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
       query: ({ id, code, amount }) => ({ url: `/admin/food/orders/${id}/retry-money`, method: 'POST', body: { amount }, headers: withCode(code) }),
       transformResponse: unwrap,
-      invalidatesTags: ['FoodOrders', 'Queues', 'Audit'],
+      invalidatesTags: ['FoodOrders', 'Queues', 'Approvals', 'Audit'],
     }),
     foodDisputes: b.query<Page<FoodOrder>, PageArgs>({
       query: (params) => ({ url: '/admin/food/disputes', params }),
@@ -161,7 +192,7 @@ export const api = createApi({
         body: { resolution, note: reason, amount },
         headers: withCode(code),
       }),
-      invalidatesTags: ['FoodOrders', 'Queues', 'Audit'],
+      invalidatesTags: ['FoodOrders', 'Queues', 'Approvals', 'Audit'],
     }),
 
     // ── DezenExpress ──
@@ -181,7 +212,7 @@ export const api = createApi({
         body: { amount, direction, reason },
         headers: withCode(code),
       }),
-      invalidatesTags: ['Riders', 'Audit'],
+      invalidatesTags: ['Riders', 'Queues', 'Approvals', 'Audit'],
       transformResponse: unwrap,
     }),
     bookings: b.query<Page<Booking>, PageArgs>({
@@ -201,7 +232,7 @@ export const api = createApi({
         body: { amount, reason },
         headers: withCode(code),
       }),
-      invalidatesTags: ['Bookings', 'Queues', 'Audit'],
+      invalidatesTags: ['Bookings', 'Queues', 'Approvals', 'Audit'],
       transformResponse: unwrap,
     }),
     withdrawals: b.query<Page<Withdrawal>, PageArgs>({
@@ -212,7 +243,7 @@ export const api = createApi({
     retryWithdrawal: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
       query: ({ id, code, amount }) => ({ url: `/admin/express/withdrawals/${id}/retry`, method: 'POST', body: { amount }, headers: withCode(code) }),
       transformResponse: unwrap,
-      invalidatesTags: ['Withdrawals', 'Queues', 'Audit'],
+      invalidatesTags: ['Withdrawals', 'Queues', 'Approvals', 'Audit'],
     }),
     markWithdrawalPaid: b.mutation<MoneyReceipt, { id: string; transferReference: string; amount: number } & CodeArgs>({
       transformResponse: unwrap,
@@ -222,7 +253,7 @@ export const api = createApi({
         body: { transferReference, reason, amount },
         headers: withCode(code),
       }),
-      invalidatesTags: ['Withdrawals', 'Queues', 'Audit'],
+      invalidatesTags: ['Withdrawals', 'Queues', 'Approvals', 'Audit'],
     }),
     providers: b.query<Page<DeliveryProvider>, PageArgs>({
       query: (params) => ({ url: '/admin/express/providers', params }),
@@ -258,7 +289,7 @@ export const api = createApi({
         body: { resolution, note: reason, amount },
         headers: withCode(code),
       }),
-      invalidatesTags: ['ShopDisputes', 'Queues', 'Audit'],
+      invalidatesTags: ['ShopDisputes', 'Queues', 'Approvals', 'Audit'],
     }),
     products: b.query<Page<Product>, PageArgs>({
       query: (params) => ({ url: '/admin/shopping/products', params }),
@@ -361,6 +392,11 @@ export const {
   useMeQuery,
   useSignOutMutation,
   useQueuesQuery,
+  useClaimMutation,
+  useReleaseMutation,
+  useApprovalsQuery,
+  useApproveMutation,
+  useDeclineMutation,
   useSearchQuery,
   useVendorsQuery,
   useReviewVendorMutation,

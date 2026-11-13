@@ -9,6 +9,9 @@ import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
 import { MoneySheet } from '../../components/Dialog';
 import { WHO } from '../../components/Choice';
+import { ClaimTag } from '../../components/ClaimBar';
+import { useAppSelector } from '../../store';
+import { useClaimMutation } from '../../store/api';
 import { Button, Field, Input, Money, PageHeader, Pagination, Status } from '../../components/ui';
 
 /**
@@ -25,13 +28,25 @@ export function Withdrawals() {
   const [acting, setActing] = useState<{ w: Withdrawal; action: 'retry' | 'paid' } | null>(null);
   const [transferRef, setTransferRef] = useState('');
   const mayMove = can('move_money', 'express');
+  const me = useAppSelector((s) => s.session.access?.email);
+  const [claim, claiming] = useClaimMutation();
 
   const why = (w: Withdrawal) =>
     w.status === 'failed' ? `${w.lastError} · tried ${w.attempts} times` : w.status === 'manual' ? 'No checked bank account: send it from the bank, then record it here' : undefined;
 
   const action = (w: Withdrawal) => {
     if (w.status !== 'failed' && w.status !== 'manual') return null;
+    if (w.awaitingApproval) return <Status status="pending" word="Waiting for approval" />;
     if (!mayMove) return <span className="text-[12px] text-ink-3">{WHO.move_money} act on this</span>;
+    if (w.claim && w.claim.by !== me)
+      return (
+        <span className="flex flex-col items-end gap-1">
+          <ClaimTag claim={w.claim} />
+          <Button size="sm" variant="quiet" busy={claiming.isLoading && claiming.originalArgs?.id === w.id} onClick={() => claim({ kind: 'withdrawal', id: w.id, takeOver: true })}>
+            Take over
+          </Button>
+        </span>
+      );
     return w.status === 'failed' ? (
       <Button size="sm" variant="primary" onClick={() => setActing({ w, action: 'retry' })}>
         Send again
@@ -88,6 +103,11 @@ export function Withdrawals() {
               <>
                 <Status status={w.status} />
                 {why(w) && <p className="mt-1 max-w-[34ch] text-[12px] text-ink-3">{why(w)}</p>}
+                {w.claim && (
+                  <p className="mt-1">
+                    <ClaimTag claim={w.claim} />
+                  </p>
+                )}
               </>
             ),
           },

@@ -12,6 +12,7 @@ import { RecordPage } from '../../components/RecordPage';
 import { MoneySheet } from '../../components/Dialog';
 import { PersonLink } from '../../components/PersonLink';
 import { WHO } from '../../components/Choice';
+import { ClaimBar, ClaimTag, useClaimedByOther } from '../../components/ClaimBar';
 import { Button, KeyValues, Locked, Money, PageHeader, Pagination, Status } from '../../components/ui';
 
 const needsRefund = (b: Booking) => b.status === 'cancelled' && b.paymentStatus === 'paid';
@@ -50,7 +51,7 @@ export function Bookings() {
           title: <span className="font-mono">{b.bookingRef}</span>,
           subtitle: `${b.pickup} → ${b.dropoff}`,
           amount: <Money amount={b.fare} />,
-          status: needsRefund(b) ? payment(b) : <Status status={b.status} />,
+          status: b.claim ? <ClaimTag claim={b.claim} /> : needsRefund(b) ? payment(b) : <Status status={b.status} />,
         })}
         columns={[
           { header: 'Trip', cell: (b) => <span className="font-mono">{b.bookingRef}</span> },
@@ -59,7 +60,12 @@ export function Bookings() {
           { header: 'Rider', cell: (b) => b.rider?.name ?? <span className="text-ink-3">—</span> },
           { header: 'Fare', align: 'right', cell: (b) => <Money amount={b.fare} /> },
           { header: 'Trip status', cell: (b) => <Status status={b.status} /> },
-          { header: 'Payment', cell: payment },
+          { header: 'Payment', cell: (b) => (
+            <span className="flex flex-col gap-1">
+              {payment(b)}
+              <ClaimTag claim={b.claim} />
+            </span>
+          ) },
         ]}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}
@@ -73,14 +79,15 @@ export function BookingDetail() {
   const { data: b, isLoading, error } = useBookingQuery(id);
   const [refund] = useRefundBookingMutation();
   const [open, setOpen] = useState(false);
+  const heldBy = useClaimedByOther(b?.claim);
   const action =
     b && needsRefund(b) ? (
-      can('move_money', 'express') ? (
+      can('move_money', 'express') && !heldBy ? (
         <Button variant="primary" onClick={() => setOpen(true)}>
           Refund {b.customer.name.split(' ')[0]}
         </Button>
       ) : (
-        <Locked who={WHO.move_money}>Refund {b.customer.name.split(' ')[0]}</Locked>
+        <Locked who={heldBy ? heldBy.name : WHO.move_money}>Refund {b.customer.name.split(' ')[0]}</Locked>
       )
     ) : undefined;
   return (
@@ -115,6 +122,7 @@ export function BookingDetail() {
         )
       }
     >
+      {b && needsRefund(b) && <ClaimBar kind="booking" id={b.id} claim={b.claim} />}
       {b && (
         <MoneySheet
           open={open}

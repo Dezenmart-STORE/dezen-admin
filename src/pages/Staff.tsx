@@ -6,7 +6,7 @@ import { useGrantStaffMutation, useStaffActionMutation, useStaffQuery } from '..
 import type { StaffMember } from '../store/types';
 import { Table } from '../components/Table';
 import { ConfirmWithCode } from '../components/Dialog';
-import { Badge, Button, Card, Field, Input, PageHeader, Select } from '../components/ui';
+import { Badge, Button, Card, Field, Input, PageHeader, Select, Status } from '../components/ui';
 
 export const SERVICE_LABELS: Record<string, string> = {
   '*': 'All services',
@@ -125,7 +125,7 @@ export function Staff() {
           { header: 'Where', cell: (s) => <span className="text-sm">{s.services.map((x) => SERVICE_LABELS[x] ?? x).join(', ')}</span> },
           {
             header: 'Status',
-            cell: (s) => (s.disabled ? <Badge tone="bad">No access</Badge> : s.authenticatorSet ? <Badge tone="ok">Active</Badge> : <Badge tone="warn">Not signed in yet</Badge>),
+            cell: (s) => (s.disabled ? <Status status="cancelled" word="No access" /> : s.authenticatorSet ? <Status status="done" word="Active" /> : <Status status="pending" word="Not signed in yet" />),
           },
           { header: 'Last sign-in', cell: (s) => <span className="whitespace-nowrap text-xs text-muted">{formatDate(s.lastSignInAt)}</span> },
           {

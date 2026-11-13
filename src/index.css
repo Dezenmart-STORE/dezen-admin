@@ -14,11 +14,13 @@
   --raised: #F4F5F7;
   --line: #D5D9DE;
   --ink: #1A1C1F;
-  --ink-2: #4A5058;
-  --ink-3: #6B727C;
-  --need: #E5291F;
-  --settled: #138A52;
-  --waiting: #A36A00;
+  --ink-2: #3A4047;
+  --ink-3: #585E66;
+  --need: #C21F17;
+  --settled: #0B6E40;
+  --waiting: #7F5300;
+  /* The logo keeps its own red and white, whatever the text colours do. */
+  --brand-red: #FF3B30;
   --mark-white: #212428;
   --primary-bg: #212428;
   --primary-ink: #FFFFFF;
@@ -32,9 +34,10 @@
     --raised: #33373D;
     --line: #3C4047;
     --ink: #F4F5F6;
-    --ink-2: #AEB3BA;
-    --ink-3: #8A9099;
-    --need: #FF3B30;
+    --ink-2: #C4C8CE;
+    --ink-3: #A0A6AE;
+    /* Lifted from the brand red so red text reads at 4.5:1 on every surface. */
+    --need: #FF7A72;
     --settled: #3FD08A;
     --waiting: #FFB224;
     --mark-white: #F4F5F6;
@@ -57,6 +60,7 @@
   --color-settled: var(--settled);
   --color-waiting: var(--waiting);
   --color-mark-white: var(--mark-white);
+  --color-brand-red: var(--brand-red);
   --color-primary: var(--primary-bg);
   --color-on-primary: var(--primary-ink);
 

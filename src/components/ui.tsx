@@ -25,7 +25,8 @@ export function Button({
   disabled,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; busy?: boolean }) {
-  const sizes = { sm: 'h-8 px-3 text-[13px]', md: 'h-10 px-4 text-sm', lg: 'h-12 px-5 text-[15px]' };
+  // Small buttons stay 36px tall on touch screens so they are easy to hit.
+  const sizes = { sm: 'h-9 px-3 text-[13px] md:h-8', md: 'h-11 px-4 text-sm md:h-10', lg: 'h-12 px-5 text-[15px]' };
   return (
     <button
       type="button"
@@ -227,16 +228,36 @@ export function Segments<T extends string>({
   onChange: (v: T) => void;
   label: string;
 }) {
+  // Arrow keys move between options, as in any radio group; only the chosen one is in the tab order.
+  const move = (dir: 1 | -1) => {
+    const i = options.findIndex((o) => o.value === value);
+    const next = options[(i + dir + options.length) % options.length];
+    onChange(next.value);
+    requestAnimationFrame(() => document.getElementById(`seg-${label}-${next.value}`)?.focus());
+  };
   return (
-    <div role="radiogroup" aria-label={label} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
+      onKeyDown={(e) => {
+        const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+        if (dir) {
+          e.preventDefault();
+          move(dir);
+        }
+      }}
+    >
       {options.map((o) => {
         const on = value === o.value;
         return (
           <button
             key={o.value}
+            id={`seg-${label}-${o.value}`}
             type="button"
             role="radio"
             aria-checked={on}
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={`h-8 shrink-0 cursor-pointer rounded-full border px-3.5 text-[13px] font-medium transition-colors ${on ? 'border-transparent bg-primary text-on-primary' : 'border-line text-ink-2 hover:text-ink hover:border-ink-3'}`}
           >

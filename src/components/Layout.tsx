@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { FiHome, FiLogOut, FiMenu, FiSearch, FiX } from 'react-icons/fi';
+import { FiBell, FiBellOff, FiHome, FiLogOut, FiMenu, FiSearch, FiWifiOff, FiX } from 'react-icons/fi';
+import { useAlertSetting, useOnline, useUrgentAlerts } from '../lib/device';
 import { USE_SAMPLE_DATA } from '../lib/config';
 import { useAppDispatch, useAppSelector, useCan } from '../store';
 import { accessLoaded, signedOut } from '../store/session';
 import { api, useMeQuery, useQueuesQuery, useSignOutMutation } from '../store/api';
 import type { Capability, Service } from '../store/types';
 import { ServiceGlyph, Wordmark } from './brand';
+import { Shortcuts } from './Shortcuts';
 
 interface NavItem {
   to: string;
@@ -103,30 +105,20 @@ export function Layout() {
   const { staffToken, access } = useAppSelector((s) => s.session);
   const dispatch = useAppDispatch();
   const can = useCan();
-  const navigate = useNavigate();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [signOut] = useSignOutMutation();
   const me = useMeQuery(undefined, { skip: !staffToken });
   const queues = useQueuesQuery(undefined, { skip: !staffToken, pollingInterval: 60_000 });
+  const online = useOnline();
+  const alerts = useAlertSetting();
+  useUrgentAlerts(queues.data, alerts.enabled);
 
   useEffect(() => {
     if (me.data) dispatch(accessLoaded(me.data));
   }, [me.data, dispatch]);
   useEffect(() => setMenuOpen(false), [pathname]);
-  // "/" jumps to search from anywhere, the way staff reach for it on a call.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (e.key === '/' && !/input|textarea|select/i.test(t.tagName) && !t.isContentEditable) {
-        e.preventDefault();
-        if (window.matchMedia('(min-width: 768px)').matches) document.getElementById('top-search')?.focus();
-        else navigate('/search');
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [navigate]);
+
 
   /** Items waiting per menu link, from the queues. */
   const waiting = useMemo(() => {
@@ -168,7 +160,8 @@ export function Layout() {
       <div className="mb-6 px-3">
         <Wordmark />
       </div>
-      {link('/', 'Home', totalWaiting, true)}
+      {link('/', 'Home', totalWaiting - (waiting['/approvals'] ?? 0), true)}
+      {access?.capabilities.includes('move_money') && link('/approvals', 'Approvals', waiting['/approvals'])}
       {groups.map((g) => (
         <div key={g.group} className="mt-6">
           <p className="mb-1.5 flex items-center gap-2 px-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.1em] text-ink-3">
@@ -183,6 +176,18 @@ export function Layout() {
           <span className="inline-flex items-center gap-1.5 rounded-full border border-waiting/40 px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-waiting">
             Sample data
           </span>
+        )}
+        {alerts.supported && (
+          <button
+            type="button"
+            onClick={() => (alerts.enabled ? alerts.turnOff() : alerts.turnOn())}
+            disabled={alerts.blocked}
+            title={alerts.blocked ? 'Alerts are blocked in this browser. Allow them in the site settings.' : undefined}
+            className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {alerts.enabled ? <FiBell aria-hidden className="h-3.5 w-3.5" /> : <FiBellOff aria-hidden className="h-3.5 w-3.5" />}
+            {alerts.enabled ? 'Alerts on for urgent work' : 'Turn on alerts'}
+          </button>
         )}
         <p className="truncate text-[12.5px] text-ink-3" title={access?.email}>
           {access?.email}
@@ -204,6 +209,10 @@ export function Layout() {
 
   return (
     <div className="min-h-dvh md:flex">
+      <a href="#main" className="sr-only z-50 rounded-leaf-sm bg-primary px-4 py-2 text-on-primary focus:not-sr-only focus:fixed focus:left-4 focus:top-4">
+        Skip to the work
+      </a>
+      <Shortcuts />
       {/* Desktop menu */}
       <aside className="hidden w-64 shrink-0 border-r border-line bg-sunk md:sticky md:top-0 md:block md:h-dvh">{menu}</aside>
 
@@ -232,7 +241,13 @@ export function Layout() {
             <TopSearch />
           </div>
         </div>
-        <main className="mx-auto max-w-[1200px] px-4 pb-10 pt-6 md:px-8 md:pt-9">
+        {!online && (
+          <p role="status" className="flex items-center justify-center gap-2 border-b border-waiting/40 bg-waiting/[0.1] px-4 py-2 text-center text-[13px]">
+            <FiWifiOff aria-hidden className="h-3.5 w-3.5 shrink-0 text-waiting" />
+            You're offline. What you see may be out of date, and nothing can be sent until you're back.
+          </p>
+        )}
+        <main id="main" tabIndex={-1} className="mx-auto max-w-[1200px] px-4 pb-10 pt-6 outline-none md:px-8 md:pt-9">
           <Outlet />
         </main>
       </div>

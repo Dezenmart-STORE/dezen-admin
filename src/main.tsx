@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import './index.css';
-import { store, useCan } from './store';
+import { registerServiceWorker } from './lib/device';
+import { store, useAppSelector, useCan } from './store';
 import type { Capability, Service } from './store/types';
 import { Layout } from './components/Layout';
 import { PageHeader } from './components/ui';
@@ -25,6 +26,7 @@ import { Payments, Reconciliation, Webhooks } from './pages/money/Money';
 import { Settings } from './pages/Settings';
 import { Staff } from './pages/Staff';
 import { Activity } from './pages/Activity';
+import { Approvals } from './pages/Approvals';
 
 function NotHere({ text }: { text: string }) {
   return (
@@ -43,9 +45,17 @@ function Gate({ need, children }: { need: [Capability, Service]; children: React
   return can(...need) ? children : <NotHere text="Your access does not cover this page. An owner can change it on the Staff page." />;
 }
 
+/** Approvals are for anyone who can move money, on any service. */
+function MoneyGate({ children }: { children: ReactNode }) {
+  const caps = useAppSelector((s) => s.session.access?.capabilities ?? []);
+  return caps.includes('move_money') ? children : <NotHere text="Approvals are for staff who can send refunds and payouts." />;
+}
+
 const page = (path: string, need: [Capability, Service], element: ReactNode) => (
   <Route key={path} path={path} element={<Gate need={need}>{element}</Gate>} />
 );
+
+registerServiceWorker();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -58,6 +68,7 @@ createRoot(document.getElementById('root')!).render(
           <Route element={<Layout />}>
             <Route index element={<Home />} />
             <Route path="search" element={<Search />} />
+            <Route path="approvals" element={<MoneyGate><Approvals /></MoneyGate>} />
             {page('food/orders', ['support', 'food'], <FoodOrders />)}
             {page('food/orders/:id', ['support', 'food'], <FoodOrderDetail />)}
             {page('food/disputes', ['support', 'food'], <FoodDisputes />)}

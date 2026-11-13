@@ -45,6 +45,26 @@ Production builds must set `VITE_USE_SAMPLE_DATA=false`.
 - Refunds, payouts, rulings, wallet corrections, fee changes and staff changes ask for a fresh authenticator code.
 - Refunds and hand payments also ask the operator to type the amount.
 
+## Working faster and safer
+
+- **Claims:** "Take this" on a record tells everyone you are handling it. Their money actions are refused until you let it go, or until they take it over, which is logged.
+- **Second approval:** payments above the threshold (₦100,000 by default, set in Fees and fares) wait on the Approvals page. A different person approves them through the same money ritual. Nobody can approve their own request.
+- **Keyboard:** press `?` for the shortcuts.
+  - `/` searches.
+  - `j` and `k` move through rows, and Enter opens one.
+  - `g` then a letter jumps to a page.
+  - `b` goes back.
+  - No shortcut moves money.
+- **Phone app:** add it to the home screen from the browser menu.
+  - The app shell still opens when you're offline.
+  - Money actions are refused while offline, and nothing is queued to send later.
+  - "Turn on alerts" in the menu notifies you when an urgent queue grows while the admin is open. Alerts while it is closed need backend push (see the checklist).
+- **Accessibility:**
+  - Every text colour meets 4.5:1 contrast in both themes.
+  - There is a skip link and visible focus, and status is never shown by colour alone.
+  - Arrow keys work in filter chips.
+  - Reduced motion is respected.
+
 ## Design: "Four around one"
 
 The Dezenmart mark is four shapes around one centre; the four services are the shapes and the admin is the centre. The mark is the system: a petal (rounded on three corners) means a person is needed, a circle means settled, a ring means on its way. Home opens on the mark itself, lit per service that needs someone. Every money action is the same ritual (type the amount, reason, code; the button names action, amount and person) and ends in a receipt where the petal closes into a circle. Primitives live in `src/components/brand.tsx`, tokens in `src/index.css`.

@@ -8,6 +8,8 @@ import type { ShopDispute } from '../../store/types';
 import { Table } from '../../components/Table';
 import { Dialog, MoneySheet } from '../../components/Dialog';
 import { Choice, WHO } from '../../components/Choice';
+import { ClaimTag } from '../../components/ClaimBar';
+import { useAppSelector } from '../../store';
 import { Button, InfoNote, Money, PageHeader, Pagination, Status } from '../../components/ui';
 
 type Resolution = 'refund_buyer' | 'release_to_seller';
@@ -23,6 +25,7 @@ export function ShopDisputes() {
   const [rule] = useRuleShopDisputeMutation();
   const [choosing, setChoosing] = useState<ShopDispute | null>(null);
   const [ruling, setRuling] = useState<{ d: ShopDispute; resolution: Resolution } | null>(null);
+  const me = useAppSelector((s) => s.session.access?.email);
 
   const state = (d: ShopDispute) =>
     d.ruling ? (
@@ -30,6 +33,8 @@ export function ShopDisputes() {
         <Status status="pending" word={d.ruling.resolution === 'refund_buyer' ? 'Refund buyer · waiting for an owner' : 'Pay seller · waiting for an owner'} />
         <span className="text-[11.5px] text-ink-3">by {d.ruling.by}</span>
       </span>
+    ) : d.claim && d.claim.by !== me ? (
+      <ClaimTag claim={d.claim} />
     ) : can('move_money', 'shopping') ? (
       <Button size="sm" variant="primary" onClick={() => setChoosing(d)}>
         Make a ruling

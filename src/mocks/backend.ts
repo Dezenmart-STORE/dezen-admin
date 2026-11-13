@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { AuditEvent, Capability, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { Approval, AuditEvent, Capability, Claim, ClaimKind, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -26,7 +26,7 @@ const role = () => {
 const EMAIL = 'you@dezenmart.com';
 
 type Result = { data: unknown; error?: undefined } | { data?: undefined; error: FetchBaseQueryError };
-type Req = { method: string; params: Record<string, string>; body: Record<string, unknown>; code?: string; match: RegExpMatchArray };
+type Req = { method: string; params: Record<string, string>; body: Record<string, unknown>; code?: string; match: RegExpMatchArray; gated?: boolean };
 type Handler = (req: Req) => unknown;
 interface Route {
   method: string;
@@ -88,13 +88,54 @@ const checkAmount = (req: Req, expected: number) => {
 };
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
+// ── claims ───────────────────────────────────────────────────────────────────
+
+const NAME = 'You';
+/** Refuse a money action on a record someone else is handling. */
+const guardClaim = (rec: { claim?: Claim | null }) => {
+  if (rec.claim && rec.claim.by !== EMAIL) {
+    const since = new Date(rec.claim.since).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+    throw new Fail(409, `${rec.claim.name} is working on this since ${since}. Ask them, or take it over first.`);
+  }
+};
+const claimable = (kind: ClaimKind, id: string): { rec: { claim?: Claim | null }; label: string; service: Service } => {
+  if (kind === 'food-order') { const o = find(db.foodOrders, id, 'Order'); return { rec: o, label: o.orderRef, service: 'food' }; }
+  if (kind === 'booking') { const b = find(db.bookings, id, 'Trip'); return { rec: b, label: b.bookingRef, service: 'express' }; }
+  if (kind === 'withdrawal') { const w = find(db.withdrawals, id, 'Withdrawal'); return { rec: w, label: `${w.rider.name}'s withdrawal`, service: 'express' }; }
+  const d = find(db.shopDisputes, id, 'Dispute');
+  return { rec: d, label: d.order.orderRef, service: 'shopping' };
+};
+
+// ── second approver ──────────────────────────────────────────────────────────
+
+/** What approving each waiting request will do. */
+const performers = new Map<string, () => MoneyReceipt>();
+let approvalNo = 100;
+/**
+ * Above the threshold, a money action becomes a request for a second person instead of moving money.
+ */
+const gate = (
+  req: Req,
+  info: { service: Service; summary: string; amount: number; currency?: string; recipient: string; link: string; target: Approval['target'] },
+  perform: () => MoneyReceipt,
+) => {
+  if (info.amount <= db.settings.approvalThreshold) return ok(perform());
+  req.gated = true;
+  const id = `ap${++approvalNo}`;
+  db.approvals.unshift({ id, ...info, currency: info.currency ?? 'NGN', reason: String(req.body.reason ?? req.body.note ?? ''), requestedBy: EMAIL, requestedAt: now(), status: 'pending' });
+  performers.set(id, perform);
+  return ok({ ...receipt(info.amount, info.recipient, 'awaiting_approval', { label: 'See approvals', link: '/approvals' }, info.currency ?? 'NGN'), approvalId: id });
+};
+
 // ── queues and search ────────────────────────────────────────────────────────
 
 const queues = (): QueueItem[] => {
   const oldest = (dates: string[]) => dates.sort()[0];
   const failedFood = db.foodOrders.filter((o) => o.payout?.status === 'failed' || o.refund?.status === 'failed');
   const toRefund = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
-  const stuck = db.withdrawals.filter((w) => w.status === 'failed' || w.status === 'manual');
+  // A withdrawal already waiting for a second approval is counted there, not here.
+  const awaiting = (w: (typeof db.withdrawals)[number]) => db.approvals.some((ap) => ap.status === 'pending' && ap.target.id === w.id);
+  const stuck = db.withdrawals.filter((w) => (w.status === 'failed' || w.status === 'manual') && !awaiting(w));
   const foodDisputes = db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved);
   const shopDisputes = db.shopDisputes.filter((d) => !d.ruling);
   const failedPayouts = failedFood.filter((o) => o.payout?.status === 'failed').length;
@@ -104,7 +145,10 @@ const queues = (): QueueItem[] => {
   const pendingRiders = byStatus(db.riders, 'pending');
   const reported = db.products.filter((p) => p.reports > 0 && p.visible);
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const r0 = role();
+  const waitingApproval = db.approvals.filter((a) => a.status === 'pending' && r0.capabilities.includes('move_money') && (r0.services.includes('*') || r0.services.includes(a.service)));
   const items: QueueItem[] = [
+    { key: 'approvals', service: 'platform', label: 'Waiting for a second approval', detail: 'Large payments a colleague asked for', count: waitingApproval.length, amountAtStake: sum(waitingApproval.map((a) => a.amount)), oldestAt: oldest(waitingApproval.map((a) => a.requestedAt)), link: '/approvals', urgent: true },
     { key: 'express-refunds', service: 'express', label: 'Cancelled trips to refund', detail: `${plural(toRefund.length, 'customer', 'customers')} paid and waiting`, count: toRefund.length, amountAtStake: sum(toRefund.map((b) => b.fare)), oldestAt: oldest(toRefund.map((b) => b.createdAt)), link: '/express/bookings?status=to_refund', urgent: true },
     { key: 'withdrawals', service: 'express', label: 'Rider withdrawals stuck', detail: `${plural(stuck.length - handPay, 'bank failure', 'bank failures')} · ${handPay} to pay by hand`, count: stuck.length, amountAtStake: sum(stuck.map((w) => w.amount)), oldestAt: oldest(stuck.map((w) => w.requestedAt)), link: '/express/withdrawals?status=stuck', urgent: true },
     { key: 'food-money', service: 'food', label: 'Food payments that failed', detail: `${plural(failedPayouts, 'vendor payout', 'vendor payouts')} · ${plural(failedRefunds, 'buyer refund', 'buyer refunds')}`, count: failedFood.length, amountAtStake: sum(failedFood.map((o) => (o.refund?.status === 'failed' ? o.refund.amount : (o.payout?.amount ?? 0)))), oldestAt: oldest(failedFood.map((o) => o.createdAt)), link: '/food/orders?status=money_failed', urgent: true },
@@ -137,6 +181,14 @@ const search = (q: string): SearchResult[] => {
   return out.filter(mayOpen).slice(0, 30);
 };
 
+// The seeded approval: approving it sends the 180,000 withdrawal again.
+performers.set('ap1', () => {
+  const w = db.withdrawals.find((x) => x.id === 'w0101')!;
+  w.status = 'processing';
+  w.attempts += 1;
+  return receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'sent');
+});
+
 // ── routes ───────────────────────────────────────────────────────────────────
 
 const routes: Route[] = [
@@ -153,6 +205,81 @@ const routes: Route[] = [
   },
   { method: 'GET', path: /^\/admin\/auth\/me$/, handle: () => ok({ email: EMAIL, ...role() }) },
   { method: 'POST', path: /^\/admin\/auth\/sign-out$/, handle: () => ok({ signedOut: true }) },
+
+  // claims
+  {
+    method: 'POST',
+    path: /^\/admin\/claims$/,
+    log: (r) => `${r.body.takeOver ? 'Took over' : 'Took'} ${claimable(r.body.kind as ClaimKind, String(r.body.id)).label}`,
+    handle: (req) => {
+      const { rec, service } = claimable(req.body.kind as ClaimKind, String(req.body.id));
+      const r = role();
+      if (!r.capabilities.includes('support') || !(r.services.includes('*') || r.services.includes(service))) throw new Fail(403, 'Your staff access does not cover this');
+      if (rec.claim && rec.claim.by !== EMAIL && !req.body.takeOver) throw new Fail(409, `${rec.claim.name} is already working on this`);
+      rec.claim = { by: EMAIL, name: NAME, since: now() };
+      return ok(rec.claim);
+    },
+  },
+  {
+    method: 'DELETE',
+    path: /^\/admin\/claims\/([^/]+)\/([^/]+)$/,
+    log: (r) => `Let go of ${claimable(r.match[1] as ClaimKind, r.match[2]).label}`,
+    handle: ({ match }) => {
+      const { rec } = claimable(match[1] as ClaimKind, match[2]);
+      if (rec.claim && rec.claim.by !== EMAIL) throw new Fail(409, 'Only the person handling this can let it go');
+      rec.claim = null;
+      return ok({ released: true });
+    },
+  },
+
+  // approvals
+  {
+    method: 'GET',
+    path: /^\/admin\/approvals$/,
+    handle: ({ params }) => {
+      const r = role();
+      const mine = db.approvals.filter((a) => r.capabilities.includes('move_money') && (r.services.includes('*') || r.services.includes(a.service)));
+      return ok(page(params.status ? mine.filter((a) => a.status === params.status) : mine, params));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/approvals\/([^/]+)\/approve$/,
+    code: true,
+    log: (r) => `Approved: ${db.approvals.find((a) => a.id === r.match[1])?.summary}`,
+    handle: (req) => {
+      const a = find(db.approvals, req.match[1], 'Approval');
+      const r = role();
+      if (!r.capabilities.includes('move_money') || !(r.services.includes('*') || r.services.includes(a.service))) throw new Fail(403, 'Your staff access does not cover this');
+      if (a.status !== 'pending') throw new Fail(409, `This was already ${a.status}`);
+      if (a.requestedBy === EMAIL) throw new Fail(409, 'You asked for this one, so someone else must approve it');
+      checkAmount(req, a.amount);
+      const perform = performers.get(a.id);
+      if (!perform) throw new Fail(409, 'This request can no longer be carried out');
+      const result = perform();
+      a.status = 'approved';
+      a.decidedBy = EMAIL;
+      a.decidedAt = now();
+      return ok(result);
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/approvals\/([^/]+)\/decline$/,
+    log: (r) => `Declined: ${db.approvals.find((a) => a.id === r.match[1])?.summary}`,
+    handle: (req) => {
+      const a = find(db.approvals, req.match[1], 'Approval');
+      const r = role();
+      if (!r.capabilities.includes('move_money') || !(r.services.includes('*') || r.services.includes(a.service))) throw new Fail(403, 'Your staff access does not cover this');
+      if (a.status !== 'pending') throw new Fail(409, `This was already ${a.status}`);
+      a.status = 'declined';
+      a.declineReason = needReason(req);
+      a.decidedBy = EMAIL;
+      a.decidedAt = now();
+      performers.delete(a.id);
+      return ok(a);
+    },
+  },
 
   // home
   { method: 'GET', path: /^\/admin\/queues$/, handle: () => ok(queues()) },
@@ -216,12 +343,16 @@ const routes: Route[] = [
       const o = find(db.foodOrders, req.match[1], 'Order');
       const m = o.refund?.status === 'failed' ? o.refund : o.payout?.status === 'failed' ? o.payout : undefined;
       if (!m) throw new Fail(409, 'Nothing failed on this order');
+      guardClaim(o);
       checkAmount(req, m.amount);
-      m.status = 'processing';
-      m.attempts += 1;
-      addNote(o.id, 'Payment sent again');
-      const next = db.foodOrders.find((x) => x.id !== o.id && (x.payout?.status === 'failed' || x.refund?.status === 'failed'));
-      return ok(receipt(m.amount, m === o.refund ? o.buyer.name : o.vendor.name, 'sent', next && { label: `Next failed payment: ${next.orderRef}`, link: `/food/orders/${next.id}` }));
+      const who = m === o.refund ? o.buyer.name : o.vendor.name;
+      return gate(req, { service: 'food', summary: `Send ₦${m.amount.toLocaleString('en-NG')} to ${who} again (${o.orderRef})`, amount: m.amount, recipient: who, link: `/food/orders/${o.id}`, target: { kind: 'food-order', id: o.id } }, () => {
+        m.status = 'processing';
+        m.attempts += 1;
+        addNote(o.id, 'Payment sent again');
+        const next = db.foodOrders.find((x) => x.id !== o.id && (x.payout?.status === 'failed' || x.refund?.status === 'failed'));
+        return receipt(m.amount, who, 'sent', next && { label: `Next failed payment: ${next.orderRef}`, link: `/food/orders/${next.id}` });
+      });
     },
   },
   {
@@ -239,10 +370,14 @@ const routes: Route[] = [
     handle: (req) => {
       const o = find(db.foodOrders, req.match[1], 'Order');
       if (!o.dispute || o.dispute.resolved) throw new Fail(409, 'This dispute is already settled');
+      guardClaim(o);
       needReason(req);
-      o.dispute.resolved = true;
       const refund = req.body.resolution === 'refund_buyer';
-      checkAmount(req, refund ? o.total : o.subtotal);
+      const amount = refund ? o.total : o.subtotal;
+      checkAmount(req, amount);
+      const who = refund ? o.buyer.name : o.vendor.name;
+      return gate(req, { service: 'food', summary: `${refund ? 'Refund' : 'Pay'} ₦${amount.toLocaleString('en-NG')} ${refund ? 'to' : 'to'} ${who} (${o.orderRef} ruling)`, amount, recipient: who, link: `/food/orders/${o.id}`, target: { kind: 'food-order', id: o.id } }, () => {
+      o.dispute!.resolved = true;
       if (refund) {
         o.status = 'refunded';
         o.refund = { status: 'processing', amount: o.total, attempts: 1 };
@@ -252,7 +387,8 @@ const routes: Route[] = [
       }
       addNote(o.id, refund ? 'Ruled: refund the buyer' : 'Ruled: pay the vendor');
       const next = db.foodOrders.find((x) => x.id !== o.id && x.dispute && !x.dispute.resolved);
-      return ok(receipt(refund ? o.total : o.subtotal, refund ? o.buyer.name : o.vendor.name, 'sent', next && { label: `Next dispute: ${next.orderRef}`, link: `/food/orders/${next.id}` }));
+      return receipt(amount, who, 'sent', next && { label: `Next dispute: ${next.orderRef}`, link: `/food/orders/${next.id}` });
+      });
     },
   },
 
@@ -287,8 +423,11 @@ const routes: Route[] = [
       const amount = Number(req.body.amount);
       if (!(amount > 0)) throw new Fail(422, 'Enter an amount above zero');
       if (req.body.direction === 'debit' && amount > r.walletBalance) throw new Fail(409, 'That is more than the wallet holds');
-      r.walletBalance += req.body.direction === 'credit' ? amount : -amount;
-      return ok(receipt(amount, `${r.name}'s wallet, now ₦${r.walletBalance.toLocaleString('en-NG')}`, 'recorded'));
+      const credit = req.body.direction === 'credit';
+      return gate(req, { service: 'express', summary: `${credit ? 'Add' : 'Take'} ₦${amount.toLocaleString('en-NG')} ${credit ? 'to' : 'from'} ${r.name}'s wallet`, amount, recipient: `${r.name}'s wallet`, link: '/express/riders?status=verified', target: { kind: 'rider-wallet', id: r.id } }, () => {
+        r.walletBalance += credit ? amount : -amount;
+        return receipt(amount, `${r.name}'s wallet, now ₦${r.walletBalance.toLocaleString('en-NG')}`, 'recorded');
+      });
     },
   },
   {
@@ -328,10 +467,13 @@ const routes: Route[] = [
       needReason(req);
       if (b.paymentStatus !== 'paid') throw new Fail(409, 'This trip has no payment to refund');
       if (Number(req.body.amount) !== b.fare) throw new Fail(422, 'The amount must match the fare paid');
-      b.paymentStatus = 'refund_pending';
-      addNote(b.id, 'Refund sent to the customer');
-      const next = db.bookings.find((x) => x.id !== b.id && x.status === 'cancelled' && x.paymentStatus === 'paid');
-      return ok(receipt(b.fare, b.customer.name, 'sent', next && { label: `Next refund due: ${next.bookingRef}`, link: `/express/bookings/${next.id}` }));
+      guardClaim(b);
+      return gate(req, { service: 'express', summary: `Refund ₦${b.fare.toLocaleString('en-NG')} to ${b.customer.name} (${b.bookingRef})`, amount: b.fare, recipient: b.customer.name, link: `/express/bookings/${b.id}`, target: { kind: 'booking', id: b.id } }, () => {
+        b.paymentStatus = 'refund_pending';
+        addNote(b.id, 'Refund sent to the customer');
+        const next = db.bookings.find((x) => x.id !== b.id && x.status === 'cancelled' && x.paymentStatus === 'paid');
+        return receipt(b.fare, b.customer.name, 'sent', next && { label: `Next refund due: ${next.bookingRef}`, link: `/express/bookings/${next.id}` });
+      });
     },
   },
   {
@@ -340,7 +482,8 @@ const routes: Route[] = [
     needs: ['support', 'express'],
     handle: ({ params }) => {
       const xs = params.status === 'stuck' ? db.withdrawals.filter((w) => w.status === 'failed' || w.status === 'manual') : byStatus(db.withdrawals, params.status);
-      return ok(page(xs.filter((w) => matches(params.q, w.rider.name)), params));
+      const pending = (id: string) => db.approvals.some((a) => a.status === 'pending' && a.target.id === id);
+      return ok(page(xs.filter((w) => matches(params.q, w.rider.name)).map((w) => ({ ...w, awaitingApproval: pending(w.id) })), params));
     },
   },
   {
@@ -352,10 +495,17 @@ const routes: Route[] = [
     handle: (req) => {
       const w = find(db.withdrawals, req.match[1], 'Withdrawal');
       if (w.status !== 'failed') throw new Fail(409, 'Only a failed withdrawal can be sent again');
+      guardClaim(w);
       checkAmount(req, w.amount);
-      w.status = 'processing';
-      w.attempts += 1;
-      return ok(receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'sent'));
+      if (db.approvals.some((a) => a.status === 'pending' && a.target.id === w.id)) {
+        throw new Fail(409, 'A request to send this is already waiting for approval');
+      }
+      const to = `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`;
+      return gate(req, { service: 'express', summary: `Send ₦${w.amount.toLocaleString('en-NG')} to ${w.rider.name} again`, amount: w.amount, recipient: to, link: '/express/withdrawals?status=stuck', target: { kind: 'withdrawal', id: w.id } }, () => {
+        w.status = 'processing';
+        w.attempts += 1;
+        return receipt(w.amount, to, 'sent');
+      });
     },
   },
   {
@@ -369,9 +519,13 @@ const routes: Route[] = [
       needReason(req);
       if (!String(req.body.transferReference ?? '').trim()) throw new Fail(422, 'Enter the bank transfer reference');
       if (w.status !== 'manual' && w.status !== 'failed') throw new Fail(409, 'This withdrawal is not waiting to be paid by hand');
+      guardClaim(w);
       checkAmount(req, w.amount);
-      w.status = 'paid';
-      return ok(receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'recorded'));
+      const to = `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`;
+      return gate(req, { service: 'express', summary: `Record ₦${w.amount.toLocaleString('en-NG')} paid by hand to ${w.rider.name}`, amount: w.amount, recipient: to, link: '/express/withdrawals?status=stuck', target: { kind: 'withdrawal', id: w.id } }, () => {
+        w.status = 'paid';
+        return receipt(w.amount, to, 'recorded');
+      });
     },
   },
   {
@@ -431,6 +585,7 @@ const routes: Route[] = [
     handle: (req) => {
       const d = find(db.shopDisputes, req.match[1], 'Dispute');
       if (d.ruling) throw new Fail(409, 'This dispute already has a ruling');
+      guardClaim(d);
       checkAmount(req, d.order.amount);
       d.ruling = { resolution: req.body.resolution as 'refund_buyer' | 'release_to_seller', by: EMAIL, at: now(), note: needReason(req), carriedOut: false };
       const who = d.ruling.resolution === 'refund_buyer' ? d.order.buyer.name : d.order.seller.name;
@@ -626,7 +781,7 @@ export async function sampleBaseQuery(args: string | FetchArgs): Promise<Result>
       staffEmail: EMAIL,
       capability: route.needs?.[0],
       service: route.needs?.[1],
-      summary: outcome === 'done' ? route.log(req) : `Tried: ${route.log(req)}`,
+      summary: outcome === 'done' ? (req.gated ? `Asked for approval: ${route.log(req)}` : route.log(req)) : `Tried: ${route.log(req)}`,
       action: `${method} ${path}`,
       reason: (body.reason ?? body.note) as string | undefined,
       outcome,

@@ -4,7 +4,15 @@ import { useListParams } from '../../lib/useListParams';
 import { usePaymentsQuery, useReconciliationQuery, useWebhooksQuery } from '../../store/api';
 import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
-import { Badge, Card, Empty, ErrorNote, Loading, PageHeader, Pagination, StatusBadge } from '../../components/ui';
+import { Card, Empty, ErrorNote, Loading, PageHeader, Pagination, Status, StatusBadge } from '../../components/ui';
+
+/** What a payment company's notice means, in plain words. */
+const NOTICE: Record<string, string> = {
+  'deposit.success': 'Money received',
+  'charge.success': 'Payment received',
+  'transfer.success': 'Payout sent',
+  'transfer.failed': 'Payout failed',
+};
 
 const SERVICE: Record<string, string> = { food: 'DezenFoods', express: 'DezenExpress', shopping: 'Shopping', platform: 'Dezenmart' };
 
@@ -81,18 +89,26 @@ export function Webhooks() {
         columns={[
           { header: 'Received', cell: (w) => <span className="whitespace-nowrap text-xs text-muted">{formatDate(w.receivedAt)}</span> },
           { header: 'From', cell: (w) => w.provider },
-          { header: 'Notice', cell: (w) => <span className="font-mono text-xs">{w.event}</span> },
+          {
+            header: 'Notice',
+            cell: (w) => (
+              <>
+                <p>{NOTICE[w.event] ?? w.event}</p>
+                <p className="font-mono text-[11.5px] text-ink-3">{w.event}</p>
+              </>
+            ),
+          },
           { header: 'Reference', cell: (w) => <span className="font-mono text-xs text-muted">{w.reference}</span> },
           {
             header: 'Result',
             cell: (w) =>
               !w.signatureOk ? (
-                <Badge tone="bad">Not trusted</Badge>
+                <Status status="failed" word="Not trusted" />
               ) : w.handled ? (
-                <Badge tone="ok">Recorded</Badge>
+                <Status status="done" word="Recorded" />
               ) : (
                 <>
-                  <Badge tone="warn">Not matched</Badge>
+                  <Status status="pending" word="Not matched" />
                   {w.error && <p className="mt-1 text-xs text-muted">{w.error}</p>}
                 </>
               ),
@@ -124,7 +140,7 @@ export function Reconciliation() {
             <Card key={run.id} className="p-5">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="font-medium">{formatDate(run.ranAt)}</h2>
-                {run.ok ? <Badge tone="ok">Everything matches</Badge> : <Badge tone="bad">Gap found</Badge>}
+                {run.ok ? <Status status="done" word="Everything matches" /> : <Status status="failed" word="Gap found" />}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

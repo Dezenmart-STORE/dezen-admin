@@ -32,6 +32,42 @@ export interface Session {
   services: (Service | '*')[];
 }
 
+/**
+ * Who is handling a record. One person at a time: the backend refuses money actions from anyone
+ * else until the claim is released or taken over, so two staff never pay the same thing twice.
+ */
+export interface Claim {
+  by: string;
+  name: string;
+  since: string;
+}
+export type ClaimKind = 'food-order' | 'booking' | 'withdrawal' | 'shop-dispute';
+
+/**
+ * A money action above the approval threshold waits here for a second person. Approving it moves
+ * the money; the person who asked can never approve their own request.
+ */
+export interface Approval {
+  id: string;
+  service: Service;
+  /** Plain words: "Send ₦180,000 to Halima Eze again". */
+  summary: string;
+  amount: number;
+  currency: string;
+  recipient: string;
+  reason: string;
+  requestedBy: string;
+  requestedAt: string;
+  /** The record the money belongs to, in the admin. */
+  link: string;
+  /** The exact record, so it shows as waiting and cannot be sent twice meanwhile. */
+  target: { kind: ClaimKind | 'rider-wallet'; id: string };
+  status: 'pending' | 'approved' | 'declined';
+  decidedBy?: string;
+  decidedAt?: string;
+  declineReason?: string;
+}
+
 /** One entry in a record's history: what happened, when, and who did it. */
 export interface TimelineEntry {
   at: string;
@@ -68,8 +104,12 @@ export interface MoneyReceipt {
   amount: number;
   currency: string;
   recipient: string;
-  /** "sent" once accepted by the bank or provider; "recorded" for a ruling or hand payment. */
-  state: 'sent' | 'recorded';
+  /**
+   * "sent" once accepted by the bank or provider; "recorded" for a ruling or hand payment;
+   * "awaiting_approval" when the amount is above the threshold and a second person must approve.
+   */
+  state: 'sent' | 'recorded' | 'awaiting_approval';
+  approvalId?: string;
   at: string;
   by: string;
   /** Where to go next in the same queue, if anything is left. */
@@ -109,6 +149,7 @@ export interface Vendor {
 export type MoneyStatus = 'pending' | 'processing' | 'paid' | 'failed';
 
 export interface FoodOrder {
+  claim?: Claim | null;
   id: string;
   orderRef: string;
   status: string;
@@ -159,6 +200,7 @@ export interface Rider {
 }
 
 export interface Booking {
+  claim?: Claim | null;
   id: string;
   bookingRef: string;
   type: 'ride' | 'delivery';
@@ -178,6 +220,9 @@ export interface BookingDetail extends Booking {
 }
 
 export interface Withdrawal {
+  claim?: Claim | null;
+  /** A request to send this is waiting for a second approval: no one should send it again meanwhile. */
+  awaitingApproval?: boolean;
   id: string;
   rider: { id: string; name: string };
   amount: number;
@@ -222,6 +267,7 @@ export interface ShopOrderDetail extends ShopOrder {
 }
 
 export interface ShopDispute {
+  claim?: Claim | null;
   id: string;
   order: ShopOrder;
   reason: string;
@@ -317,6 +363,8 @@ export interface ReconciliationRun {
 }
 
 export interface Settings {
+  /** Money actions above this many naira need a second person to approve. */
+  approvalThreshold: number;
   foodCommissionPercent: number;
   foodServiceFeePercent: number;
   expressPlatformFeePercent: number;

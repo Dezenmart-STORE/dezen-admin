@@ -10,6 +10,7 @@ import { MoneySheet } from '../../components/Dialog';
 import { Choice, WHO } from '../../components/Choice';
 import { PersonLink } from '../../components/PersonLink';
 import { StatusShape } from '../../components/brand';
+import { ClaimBar, useClaimedByOther } from '../../components/ClaimBar';
 import { Button, Card, ErrorNote, KeyValues, Locked, Money, SectionTitle, Status } from '../../components/ui';
 
 type Dialog = 'retry' | 'refund_buyer' | 'release_to_vendor' | null;
@@ -30,7 +31,8 @@ export function FoodOrderDetail() {
     if (d && o) setSnap(o);
     setDialogState(d);
   };
-  const mayMove = can('move_money', 'food');
+  const heldBy = useClaimedByOther(o?.claim);
+  const mayMove = can('move_money', 'food') && !heldBy;
   const failed = o?.refund?.status === 'failed' ? o.refund : o?.payout?.status === 'failed' ? o.payout : undefined;
   const failedIsRefund = !!o && failed === o.refund;
   const openDispute = !!o?.dispute && !o.dispute.resolved;
@@ -44,7 +46,7 @@ export function FoodOrderDetail() {
           {failedIsRefund ? 'Send the refund again' : 'Pay the vendor again'}
         </Button>
       ) : (
-        <Locked who={WHO.move_money}>{failedIsRefund ? 'Send the refund again' : 'Pay the vendor again'}</Locked>
+        <Locked who={heldBy ? heldBy.name : WHO.move_money}>{failedIsRefund ? 'Send the refund again' : 'Pay the vendor again'}</Locked>
       )
     ) : undefined;
 
@@ -63,6 +65,7 @@ export function FoodOrderDetail() {
     >
       {o && (
         <>
+          {(failed || openDispute) && <ClaimBar kind="food-order" id={o.id} claim={o.claim} />}
           {failed && (
             <Card className="border-need/40 p-5 sm:p-6">
               <div className="flex items-start gap-3">
@@ -97,7 +100,7 @@ export function FoodOrderDetail() {
                     <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3">The vendor says</p>
                     <p className="mt-1 text-[15px]">“{o.case.vendorSays}”</p>
                     <p className="mt-1 text-[13px] text-ink-3">
-                      {o.vendor.name} · {o.case.vendorDisputesLost} disputes lost
+                      {o.vendor.name} · {o.case.vendorDisputesLost} {o.case.vendorDisputesLost === 1 ? 'dispute' : 'disputes'} lost
                     </p>
                   </div>
                 )}
@@ -115,7 +118,9 @@ export function FoodOrderDetail() {
                     <Choice title="Pay the vendor" amount={o.subtotal} consequence={`${o.vendor.name} is paid for the food. ${o.buyer.name} gets nothing back.`} onChoose={() => setDialog('release_to_vendor')} />
                   </>
                 ) : (
-                  <p className="text-sm text-ink-3 sm:col-span-2">{WHO.move_money} make the ruling on disputes.</p>
+                  <p className="text-sm text-ink-3 sm:col-span-2">
+                    {heldBy ? `${heldBy.name} is handling this dispute. Take it over above to rule on it.` : `${WHO.move_money} make the ruling on disputes.`}
+                  </p>
                 )}
               </div>
             </section>
@@ -167,7 +172,7 @@ export function FoodOrderDetail() {
               </div>
             )}
           </Card>
-          {failed && !mayMove && <ErrorNote>{WHO.move_money} can send this payment again.</ErrorNote>}
+          {failed && !mayMove && !heldBy && <ErrorNote>{WHO.move_money} can send this payment again.</ErrorNote>}
 
           {snap && snapFailed && (
             <MoneySheet

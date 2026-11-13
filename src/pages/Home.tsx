@@ -101,6 +101,7 @@ export function Home() {
                   <li key={q.key}>
                     <Link
                       to={q.link}
+                      data-nav-row
                       className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line px-1 py-4 transition-colors hover:bg-surface sm:grid-cols-[auto_minmax(0,1fr)_auto_5.5rem_auto] sm:px-3"
                     >
                       <span className="flex items-center">
@@ -173,7 +174,7 @@ export function Search() {
               <ul className="border-t border-line">
                 {g.items.map((r) => (
                   <li key={`${r.kind}-${r.id}`}>
-                    <Link to={r.link} className="group flex items-center gap-4 border-b border-line px-1 py-3.5 transition-colors hover:bg-surface sm:px-3">
+                    <Link to={r.link} data-nav-row className="group flex items-center gap-4 border-b border-line px-1 py-3.5 transition-colors hover:bg-surface sm:px-3">
                       <ServiceGlyph service={r.service} size={14} title />
                       <span className="min-w-0 flex-1">
                         <span className={`block font-semibold ${r.kind === 'order' || r.kind === 'booking' || r.kind === 'payment' ? 'font-mono text-[14px]' : 'text-[15px]'}`}>{r.title}</span>

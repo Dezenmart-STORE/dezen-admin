@@ -1,4 +1,5 @@
 import type {
+  Approval,
   AuditEvent,
   Booking,
   DeliveryProvider,
@@ -382,6 +383,7 @@ export const reconciliation: ReconciliationRun[] = Array.from({ length: 7 }, (_,
 });
 
 export const settings: Settings = {
+  approvalThreshold: 100_000,
   foodCommissionPercent: 0,
   foodServiceFeePercent: 0,
   expressPlatformFeePercent: 20,
@@ -389,6 +391,59 @@ export const settings: Settings = {
   updatedAt: ago(400),
   updatedBy: 'owner@dezenmart.com',
 };
+
+// ── claims: who is handling what ─────────────────────────────────────────────
+
+// Bola (foods ops) is on the third food dispute; Femi (finance) is on the second stuck withdrawal.
+foodOrders[2].claim = { by: 'foods.ops@dezenmart.com', name: 'Bola Foods Ops', since: ago(0.7) };
+withdrawals[1].claim = { by: 'finance@dezenmart.com', name: 'Femi Finance', since: ago(1.4) };
+
+// Two large withdrawals: one above the approval threshold for you to try, one already waiting.
+{
+  const big = verifiedRiders[0];
+  withdrawals.unshift(
+    {
+      id: 'w0100',
+      rider: { id: big.id, name: big.name },
+      amount: 150_000,
+      status: 'failed',
+      attempts: 5,
+      lastError: 'Beneficiary bank unavailable',
+      bank: big.payoutAccount?.bankName ?? 'GTBank',
+      accountNumberMasked: big.payoutAccount?.accountNumberMasked ?? '******4421',
+      requestedAt: ago(30),
+    },
+    {
+      id: 'w0101',
+      rider: { id: verifiedRiders[1].id, name: verifiedRiders[1].name },
+      amount: 180_000,
+      status: 'failed',
+      attempts: 5,
+      lastError: 'Account name does not match',
+      bank: verifiedRiders[1].payoutAccount?.bankName ?? 'Access Bank',
+      accountNumberMasked: verifiedRiders[1].payoutAccount?.accountNumberMasked ?? '******9013',
+      requestedAt: ago(52),
+    },
+  );
+}
+
+/** Approvals waiting for a second person. `perform` lives in the sample backend, keyed by id. */
+export const approvals: Approval[] = [
+  {
+    id: 'ap1',
+    service: 'express',
+    summary: `Send ₦180,000 to ${verifiedRiders[1].name} again`,
+    amount: 180_000,
+    currency: 'NGN',
+    recipient: `${verifiedRiders[1].name} · ${withdrawals[1].bank} ${withdrawals[1].accountNumberMasked}`,
+    reason: 'Rider confirmed the account name with the bank; retry is safe',
+    requestedBy: 'finance@dezenmart.com',
+    requestedAt: ago(2.5),
+    link: '/express/withdrawals?status=stuck',
+    target: { kind: 'withdrawal', id: 'w0101' },
+    status: 'pending',
+  },
+];
 
 // ── staff and activity ───────────────────────────────────────────────────────
 
