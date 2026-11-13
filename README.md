@@ -1,42 +1,61 @@
 # Dezen Admin
 
-The staff website for Shopping, DezenFoods and DezenExpress. It talks only to the backend's `/api/v1/admin/*` routes (see `docs/ADMIN_API.md` in `dezenmart-backend`). The backend enforces every permission; this site only hides what a person can't use.
+The staff website for Shopping, DezenFoods and DezenExpress.
+
+The UI is complete and runs on **built-in sample data** until the backend endpoints exist. Everything the backend must build is in [docs/BACKEND_CHECKLIST.md](docs/BACKEND_CHECKLIST.md).
 
 ## Run it
 
 ```bash
 npm install
-cp .env.example .env   # set VITE_API_URL to the backend, including /api/v1
-npm run dev            # http://localhost:5173
+npm run dev   # http://localhost:5173
 ```
 
-Port 5173 is on the backend's allowed list for Google sign-in in development. In production, set `DEZEN_ADMIN_FRONTEND_URL` on the backend to this site's address (for example `https://admin.dezenmart.com`).
+With sample data (the default):
+- There is no Google step. On the sign-in page, choose a role under **Preview as** to see what that person sees.
+- Any 6-digit code works, and `000000` shows the wrong-code message.
+- Changes last until the page is reloaded.
 
-## Signing in
+A yellow bar on every page says the data is not real.
 
-1. Continue with Google (the same Dezenmart account; it must have staff access).
-2. The first time, scan the QR code with an authenticator app and enter its code. Then enter the next code to sign in.
-3. Sessions last 8 hours and are kept for the browser tab only.
+## Connect the real backend
 
-The first owner is created on the backend with `scripts/grant-staff.ts`; after that, owners give access from the Staff page.
+When the backend checklist is done:
 
-## What's here
+```bash
+VITE_API_URL=https://<backend>/api/v1
+VITE_USE_SAMPLE_DATA=false
+```
 
-| Page | Needs | What it does |
-| --- | --- | --- |
-| Home | any | Counts of what is waiting: vendors and riders to review, open disputes, failed payments |
-| DezenFoods | support on food | Vendors (approve, reject, suspend), orders (retry a failed payment), disputes (refund buyer or pay vendor) |
-| DezenExpress | support on express | Riders waiting for review; approve or reject |
-| Users | full personal details on platform | Customer records; every view is logged |
-| Staff | manage staff | Give, change and remove access; reset a lost authenticator |
-| Activity log | manage staff | Every change, refused attempt and personal-details view |
+Production builds must set `VITE_USE_SAMPLE_DATA=false`.
 
-Refunds, payouts, dispute rulings and staff changes ask for a fresh authenticator code. A refund ruling also asks the operator to type the amount.
+## Pages
 
-## Stack
+| Area | Pages |
+| --- | --- |
+| Home | What is waiting, money first; search across everything |
+| DezenFoods | Orders (with full history), disputes, vendors |
+| DezenExpress | Trips (with refunds), rider withdrawals, riders (with wallet corrections), delivery companies |
+| Shopping | Orders, disputes (rulings wait for an owner), products (hide, show, sponsor), sellers |
+| Money | Payments, payment notices from the payment companies, daily balance check |
+| Dezenmart | People (masked, with a logged “show full details”), fees and fares, staff, activity log |
 
-React 19, Vite, TypeScript, Redux Toolkit Query, React Router, Tailwind CSS 4. Shared colours live in the `@theme` block in `src/index.css`; shared pieces are in `src/components`.
+**Access:**
+- Each person sees only what their access covers. The backend is what enforces it.
+- Refunds, payouts, rulings, wallet corrections, fee changes and staff changes ask for a fresh authenticator code.
+- Refunds and hand payments also ask the operator to type the amount.
+
+## How it is built
+
+- **Stack:** React 19, Vite, TypeScript, Redux Toolkit Query, React Router and Tailwind CSS 4.
+- **The API contract:**
+  - `src/store/types.ts` defines every shape the backend returns.
+  - `src/store/api.ts` defines every call.
+- **Sample backend:** `src/mocks/` answers those calls in the browser, applying the same permission, code and activity-log rules the real backend must.
+- **Shared pieces:**
+  - Colours are in the `@theme` block in `src/index.css`.
+  - Components are in `src/components`.
 
 ## Deploy
 
-Netlify, from `netlify.toml`: `npm run build`, publish `dist`. The site sends `noindex` and refuses to be framed.
+Netlify, from `netlify.toml`. The site sends `noindex` and refuses to be framed.

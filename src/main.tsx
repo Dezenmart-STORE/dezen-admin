@@ -1,24 +1,30 @@
-import { StrictMode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import './index.css';
 import { store, useCan } from './store';
+import type { Capability, Service } from './store/types';
 import { Layout } from './components/Layout';
+import { PageHeader } from './components/ui';
 import { AuthCallback, SignIn, Verify } from './pages/SignIn';
-import { Home } from './pages/Home';
-import { Food } from './pages/Food';
-import { Express } from './pages/Express';
+import { Home, Search } from './pages/Home';
+import { Vendors } from './pages/food/Vendors';
+import { FoodOrders } from './pages/food/Orders';
+import { FoodOrderDetail } from './pages/food/OrderDetail';
+import { FoodDisputes } from './pages/food/Disputes';
+import { Riders } from './pages/express/Riders';
+import { BookingDetail, Bookings } from './pages/express/Bookings';
+import { Withdrawals } from './pages/express/Withdrawals';
+import { Providers } from './pages/express/Providers';
+import { ShopOrderDetail, ShopOrders } from './pages/shopping/Orders';
+import { ShopDisputes } from './pages/shopping/Disputes';
+import { Products, Sellers } from './pages/shopping/Products';
+import { People, PersonDetail } from './pages/People';
+import { Payments, Reconciliation, Webhooks } from './pages/money/Money';
+import { Settings } from './pages/Settings';
 import { Staff } from './pages/Staff';
 import { Activity } from './pages/Activity';
-import { Users } from './pages/Users';
-import { PageHeader } from './components/ui';
-
-/** A page the person's access does not cover shows this instead of an empty screen. */
-function Gate({ need, children }: { need: [string, string]; children: React.ReactNode }) {
-  const can = useCan();
-  return can(...need) ? children : <NotHere text="Your access does not cover this page." />;
-}
 
 function NotHere({ text }: { text: string }) {
   return (
@@ -31,6 +37,16 @@ function NotHere({ text }: { text: string }) {
   );
 }
 
+/** A page the person's access does not cover shows this instead of an empty screen. */
+function Gate({ need, children }: { need: [Capability, Service]; children: ReactNode }) {
+  const can = useCan();
+  return can(...need) ? children : <NotHere text="Your access does not cover this page. An owner can change it on the Staff page." />;
+}
+
+const page = (path: string, need: [Capability, Service], element: ReactNode) => (
+  <Route key={path} path={path} element={<Gate need={need}>{element}</Gate>} />
+);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Provider store={store}>
@@ -41,11 +57,29 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/verify" element={<Verify />} />
           <Route element={<Layout />}>
             <Route index element={<Home />} />
-            <Route path="food" element={<Gate need={['support', 'food']}><Food /></Gate>} />
-            <Route path="express" element={<Gate need={['support', 'express']}><Express /></Gate>} />
-            <Route path="users" element={<Gate need={['read_pii', 'platform']}><Users /></Gate>} />
-            <Route path="staff" element={<Gate need={['staff_admin', 'platform']}><Staff /></Gate>} />
-            <Route path="activity" element={<Gate need={['staff_admin', 'platform']}><Activity /></Gate>} />
+            <Route path="search" element={<Search />} />
+            {page('food/orders', ['support', 'food'], <FoodOrders />)}
+            {page('food/orders/:id', ['support', 'food'], <FoodOrderDetail />)}
+            {page('food/disputes', ['support', 'food'], <FoodDisputes />)}
+            {page('food/vendors', ['support', 'food'], <Vendors />)}
+            {page('express/bookings', ['support', 'express'], <Bookings />)}
+            {page('express/bookings/:id', ['support', 'express'], <BookingDetail />)}
+            {page('express/withdrawals', ['support', 'express'], <Withdrawals />)}
+            {page('express/riders', ['support', 'express'], <Riders />)}
+            {page('express/providers', ['support', 'express'], <Providers />)}
+            {page('shopping/orders', ['support', 'shopping'], <ShopOrders />)}
+            {page('shopping/orders/:id', ['support', 'shopping'], <ShopOrderDetail />)}
+            {page('shopping/disputes', ['support', 'shopping'], <ShopDisputes />)}
+            {page('shopping/products', ['support', 'shopping'], <Products />)}
+            {page('shopping/sellers', ['support', 'shopping'], <Sellers />)}
+            {page('money/payments', ['support', 'platform'], <Payments />)}
+            {page('money/notices', ['support', 'platform'], <Webhooks />)}
+            {page('money/balance-check', ['move_money', 'platform'], <Reconciliation />)}
+            {page('people', ['support', 'platform'], <People />)}
+            {page('people/:id', ['support', 'platform'], <PersonDetail />)}
+            {page('settings', ['support', 'platform'], <Settings />)}
+            {page('staff', ['staff_admin', 'platform'], <Staff />)}
+            {page('activity', ['staff_admin', 'platform'], <Activity />)}
             <Route path="*" element={<NotHere text="There is no page at this address." />} />
           </Route>
         </Routes>

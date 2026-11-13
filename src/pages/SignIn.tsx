@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { API_URL } from '../lib/config';
+import { API_URL, USE_SAMPLE_DATA } from '../lib/config';
+import { PREVIEW_KEY, PREVIEW_ROLES } from '../mocks/backend';
 import { errorMessage, statusOf } from '../lib/errors';
 import { useAppDispatch, useAppSelector } from '../store';
 import { googleSignedIn, signedOut, staffSignedIn } from '../store/session';
@@ -10,7 +11,7 @@ import {
   useSetupAuthenticatorMutation,
   useStartSessionMutation,
 } from '../store/api';
-import { Button, Card, CodeInput, ErrorNote, Field, InfoNote, Spinner } from '../components/ui';
+import { Button, Card, CodeInput, ErrorNote, Field, InfoNote, Select, Spinner } from '../components/ui';
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -26,20 +27,50 @@ function Shell({ children }: { children: React.ReactNode }) {
 /** Step 1: Google, through the backend (the same sign-in as the other Dezen apps). */
 export function SignIn() {
   const { staffToken, googleToken } = useAppSelector((s) => s.session);
+  const [preview, setPreview] = useState(() => {
+    try {
+      return sessionStorage.getItem(PREVIEW_KEY) ?? 'owner';
+    } catch {
+      return 'owner';
+    }
+  });
   if (staffToken) return <Navigate to="/" replace />;
   if (googleToken) return <Navigate to="/verify" replace />;
-  const href = `${API_URL}/auth/google?origin=${encodeURIComponent(window.location.origin)}`;
+  // With sample data there is no Google step: go straight to the code step.
+  const href = USE_SAMPLE_DATA ? '/auth/google?token=sample' : `${API_URL}/auth/google?origin=${encodeURIComponent(window.location.origin)}`;
+  const choose = (v: string) => {
+    setPreview(v);
+    try {
+      sessionStorage.setItem(PREVIEW_KEY, v);
+    } catch {
+      /* storage unavailable */
+    }
+  };
   return (
     <Shell>
       <h1 className="mb-2 text-xl font-semibold">Staff sign-in</h1>
       <p className="mb-6 text-sm text-muted">
         Sign in with the Google account your access was given to. You will then enter a code from your authenticator app.
       </p>
+      {USE_SAMPLE_DATA && (
+        <div className="mb-4 space-y-3">
+          <InfoNote>Sample data mode. Any 6-digit code works; 000000 shows the wrong-code message.</InfoNote>
+          <Field label="Preview as">
+            <Select value={preview} onChange={(e) => choose(e.target.value)}>
+              {Object.entries(PREVIEW_ROLES).map(([k, r]) => (
+                <option key={k} value={k}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      )}
       <a
         href={href}
         className="flex w-full items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-ink hover:bg-accent-hover"
       >
-        Continue with Google
+        {USE_SAMPLE_DATA ? 'Continue' : 'Continue with Google'}
       </a>
     </Shell>
   );
@@ -116,7 +147,7 @@ export function Verify() {
       if (statusOf(res.error) === 409 && /set up/i.test(errorMessage(res.error))) return begin();
       return setError(errorMessage(res.error));
     }
-    dispatch(staffSignedIn({ token: res.data.token, access: { capabilities: res.data.capabilities, services: res.data.services } }));
+    dispatch(staffSignedIn({ token: res.data.token, access: { email: res.data.email, capabilities: res.data.capabilities, services: res.data.services } }));
     navigate('/', { replace: true });
   };
 

@@ -63,16 +63,28 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }
 
+/** Words the operator reads for a status the backend sends. */
+const STATUS_WORDS: Record<string, string> = {
+  rider_accepted: 'Rider confirmed',
+  in_transit: 'On the way',
+  picked_up: 'Picked up',
+  refund_pending: 'Refund sent',
+  refund_failed: 'Refund failed',
+  manual: 'Pay by hand',
+  verified: 'Approved',
+};
+
 /** A status word coloured by what it means for the operator. */
 export function StatusBadge({ status }: { status: string }) {
-  const tone: Tone = /approved|verified|completed|delivered|paid|success|released/.test(status)
+  const tone: Tone = /approved|verified|completed|delivered|paid|success|released|^done$|refunded/.test(status)
     ? 'ok'
-    : /pending|awaiting|processing|preparing|ready|in_transit/.test(status)
+    : /pending|awaiting|processing|preparing|ready|in_transit|accepted|picked_up|shipped|manual/.test(status)
       ? 'warn'
-      : /rejected|failed|suspended|disputed|cancel|refund/.test(status)
+      : /rejected|failed|suspended|disputed|cancel|refused/.test(status)
         ? 'bad'
         : 'neutral';
-  return <Badge tone={tone}>{status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')}</Badge>;
+  const words = STATUS_WORDS[status] ?? status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+  return <Badge tone={tone}>{words}</Badge>;
 }
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
@@ -173,4 +185,38 @@ export function CodeInput({ value, onChange, autoFocus }: { value: string; onCha
       className="text-center text-lg tracking-[0.4em] font-mono"
     />
   );
+}
+
+/** Label → value pairs for a record's details. */
+export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
+  return (
+    <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-6 gap-y-2 text-sm">
+      {rows.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="text-muted">{k}</dt>
+          <dd className="min-w-0 break-words">{v ?? '—'}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function Pagination({ page, total, limit, onChange, busy }: { page: number; total: number; limit: number; onChange: (p: number) => void; busy?: boolean }) {
+  const pages = Math.max(1, Math.ceil(total / limit));
+  if (pages <= 1) return null;
+  return (
+    <nav aria-label="Pages" className="mt-4 flex items-center justify-end gap-3 text-sm text-muted">
+      <Button disabled={page <= 1 || busy} onClick={() => onChange(page - 1)}>
+        Previous
+      </Button>
+      Page {page} of {pages}
+      <Button disabled={page >= pages || busy} onClick={() => onChange(page + 1)}>
+        Next
+      </Button>
+    </nav>
+  );
+}
+
+export function SectionTitle({ children }: { children: ReactNode }) {
+  return <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">{children}</h2>;
 }

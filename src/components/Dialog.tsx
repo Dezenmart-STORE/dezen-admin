@@ -52,6 +52,8 @@ export function ConfirmWithCode({
   amount,
   askReason,
   danger,
+  children,
+  extraReady = true,
   onClose,
   onConfirm,
 }: {
@@ -62,6 +64,9 @@ export function ConfirmWithCode({
   amount?: number;
   askReason?: boolean;
   danger?: boolean;
+  /** Extra fields for this action (a transfer reference, an amount); the caller keeps their state. */
+  children?: ReactNode;
+  extraReady?: boolean;
   onClose: () => void;
   onConfirm: (input: { code: string; reason?: string }) => Promise<string | null>;
 }) {
@@ -81,7 +86,7 @@ export function ConfirmWithCode({
   }, [open]);
 
   const amountOk = amount === undefined || Number(typed.replace(/[,\s₦]/g, '')) === amount;
-  const ready = code.length === 6 && amountOk && (!askReason || reason.trim().length > 2);
+  const ready = code.length === 6 && amountOk && extraReady && (!askReason || reason.trim().length > 2);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -100,6 +105,7 @@ export function ConfirmWithCode({
     <Dialog open={open} title={title} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         <div className="text-sm text-muted">{summary}</div>
+        {children}
         {amount !== undefined && (
           <Field label="Type the amount to confirm" hint={`Exactly ${amount.toLocaleString('en-NG')}`}>
             <Input inputMode="decimal" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="0" />
@@ -113,6 +119,70 @@ export function ConfirmWithCode({
         <Field label="Code from your authenticator app">
           <CodeInput value={code} onChange={setCode} autoFocus />
         </Field>
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant={danger ? 'danger' : 'primary'} disabled={!ready} busy={busy}>
+            {actionLabel}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** Confirms a change that moves no money (approve, reject, hide). Asks for a reason when given one. */
+export function ConfirmDialog({
+  open,
+  title,
+  summary,
+  actionLabel,
+  askReason,
+  reasonHint = 'Saved in the activity log',
+  danger,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  summary: ReactNode;
+  actionLabel: string;
+  askReason?: boolean;
+  reasonHint?: string;
+  danger?: boolean;
+  onClose: () => void;
+  onConfirm: (reason?: string) => Promise<string | null>;
+}) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setReason('');
+      setError('');
+    }
+  }, [open]);
+  const ready = !askReason || reason.trim().length > 2;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    const failure = await onConfirm(askReason ? reason.trim() : undefined);
+    setBusy(false);
+    if (failure) setError(failure);
+    else onClose();
+  };
+  return (
+    <Dialog open={open} title={title} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="text-sm text-muted">{summary}</div>
+        {askReason && (
+          <Field label="Reason" hint={reasonHint}>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoFocus />
+          </Field>
+        )}
         <ErrorNote>{error}</ErrorNote>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose}>
