@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/* The one place for shared values. Colours are the Dezenmart brand palette used by the other apps. */
+@theme {
+  --color-page: #171a1e;
+  --color-card: #1e2024;
+  --color-raised: #25282d;
+  --color-line: #292b30;
+  --color-ink: #ffffff;
+  --color-muted: #9ca3af;
+  --color-accent: #ff343f;
+  --color-accent-hover: #e52e38;
+  --color-info: #39acff;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
