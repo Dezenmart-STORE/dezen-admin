@@ -139,22 +139,23 @@ function NextCard({ next, waiting, viewOnly }: { next: HomeNext | null; waiting:
   const late = hoursSince(next.waitingSince) > 24;
 
   return (
-    <section aria-labelledby="next-title" className="relative overflow-hidden rounded-leaf border border-line bg-surface">
+    <section aria-labelledby="next-title" className="@container relative overflow-hidden rounded-leaf border border-line bg-surface">
       <span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${late ? 'bg-need' : 'bg-waiting'}`} />
-      <div className="grid gap-6 p-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:p-8">
+      {/* Sized by the card, not the window: beside the aside the column can be narrow on a wide screen. */}
+      <div className="grid gap-6 p-6 @md:p-8 @xl:grid-cols-[minmax(0,1fr)_auto] @xl:items-end">
         <div className="min-w-0">
           <p className="mb-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">
             <ServiceGlyph service={next.service} size={14} />
             {next.yours ? 'You are on this' : 'Next for you'} · {next.kind}
           </p>
-          <h2 id="next-title" className="text-[22px] font-semibold leading-snug tracking-tight text-balance sm:text-[27px]">
+          <h2 id="next-title" className="text-[22px] font-semibold leading-snug tracking-tight text-balance @md:text-[27px]">
             {next.title}
           </h2>
           <p className="mt-2.5 max-w-[60ch] text-[14.5px] leading-relaxed text-ink-2">{next.why}</p>
           {error && <p className="mt-2 text-[13px] text-need">{error}</p>}
         </div>
-        <div className="flex items-center justify-between gap-4 sm:flex-col sm:items-end">
-          {typeof next.amount === 'number' && <Money amount={next.amount} className="text-[22px] sm:text-[26px]" />}
+        <div className="flex flex-wrap items-center justify-between gap-4 @xl:flex-col @xl:items-end">
+          {typeof next.amount === 'number' && <Money amount={next.amount} className="text-[22px] @md:text-[26px]" />}
           <Button variant="primary" size="lg" busy={claiming.isLoading} onClick={take} className="min-w-[9rem]">
             {next.yours ? 'Continue' : 'Take it'}
           </Button>
@@ -172,7 +173,7 @@ function Group({ group }: { group: HomeGroup }) {
         <span className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-ink-3">{group.label}</span>
         <span className="text-[14px] font-semibold">{group.summary}</span>
       </h2>
-      <ul>
+      <ul className="@container">
         {group.rows.map((r) => (
           <Row key={r.key} row={r} />
         ))}
@@ -187,7 +188,7 @@ function Row({ row }: { row: HomeRow }) {
       <Link
         to={row.link}
         data-nav-row
-        className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line px-1 py-4 transition-colors hover:bg-surface focus-visible:bg-surface sm:grid-cols-[auto_minmax(0,1fr)_auto_4.5rem_auto] sm:px-3"
+        className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line px-1 py-4 transition-colors hover:bg-surface focus-visible:bg-surface @xl:grid-cols-[auto_minmax(0,1fr)_auto_4.5rem_auto] @xl:px-3"
       >
         <ServiceGlyph service={row.service} size={18} title />
         <span className="min-w-0">
@@ -209,14 +210,14 @@ function Row({ row }: { row: HomeRow }) {
               </span>
             ))}
             {!row.canAct && <span> · view only</span>}
-            <span className={`font-mono sm:hidden ${row.late ? 'text-need' : ''}`}> · {age(row.oldestAt)}</span>
+            <span className={`font-mono @xl:hidden ${row.late ? 'text-need' : ''}`}> · {age(row.oldestAt)}</span>
           </span>
         </span>
         <span className="text-right text-[15px]">
           {typeof row.amount === 'number' ? <Money amount={row.amount} /> : <span className="font-mono font-medium">{row.count}</span>}
         </span>
-        <span className={`hidden text-right font-mono text-[12.5px] sm:block ${row.late ? 'font-semibold text-need' : 'text-ink-3'}`}>{age(row.oldestAt)}</span>
-        <FiArrowRight aria-hidden className="hidden h-4 w-4 text-ink-3 transition-transform group-hover:translate-x-0.5 group-hover:text-ink sm:block" />
+        <span className={`hidden text-right font-mono text-[12.5px] @xl:block ${row.late ? 'font-semibold text-need' : 'text-ink-3'}`}>{age(row.oldestAt)}</span>
+        <FiArrowRight aria-hidden className="hidden h-4 w-4 text-ink-3 transition-transform group-hover:translate-x-0.5 group-hover:text-ink @xl:block" />
       </Link>
     </li>
   );
