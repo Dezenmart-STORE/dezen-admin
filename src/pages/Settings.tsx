@@ -55,6 +55,7 @@ export function Settings() {
   return (
     <>
       <PageHeader
+        eyebrow="Team"
         title="Fees and fares"
         description={data ? `Last changed ${formatDate(data.updatedAt)} by ${data.updatedBy}.` : undefined}
         actions={mayEdit && <Button variant="primary" disabled={!changed.length || invalid} onClick={() => setConfirming(true)}>Save changes</Button>}

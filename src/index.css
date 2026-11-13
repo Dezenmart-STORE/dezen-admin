@@ -1,34 +1,156 @@
 @import "tailwindcss";
 
-/* The one place for shared values. Colours are the Dezenmart brand palette used by the other apps. */
-@theme {
-  --color-page: #171a1e;
-  --color-card: #1e2024;
-  --color-raised: #25282d;
-  --color-line: #292b30;
-  --color-ink: #ffffff;
-  --color-muted: #9ca3af;
-  --color-accent: #ff343f;
-  --color-accent-hover: #e52e38;
-  --color-info: #39acff;
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+/*
+ * "Four around one": the Dezenmart mark is the system.
+ *  - Ground is the mark's own charcoal. Red means only "a person is needed" or "cannot be undone".
+ *  - Primary actions take the mark's white. Settled is green, on-its-way is amber.
+ *  - Surfaces have one sharp corner (the petal's corner); everything else is round.
+ * Light theme for desks in daylight. Values live once, here.
+ */
+:root {
+  --ground: #ECEEF0;
+  --sunk: #E3E6E9;
+  --surface: #FFFFFF;
+  --raised: #F4F5F7;
+  --line: #D5D9DE;
+  --ink: #1A1C1F;
+  --ink-2: #4A5058;
+  --ink-3: #6B727C;
+  --need: #E5291F;
+  --settled: #138A52;
+  --waiting: #A36A00;
+  --mark-white: #212428;
+  --primary-bg: #212428;
+  --primary-ink: #FFFFFF;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #212428;
+    --sunk: #1A1C1F;
+    --surface: #2A2D32;
+    --raised: #33373D;
+    --line: #3C4047;
+    --ink: #F4F5F6;
+    --ink-2: #AEB3BA;
+    --ink-3: #8A9099;
+    --need: #FF3B30;
+    --settled: #3FD08A;
+    --waiting: #FFB224;
+    --mark-white: #F4F5F6;
+    --primary-bg: #F4F5F6;
+    --primary-ink: #212428;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-sunk: var(--sunk);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-need: var(--need);
+  --color-settled: var(--settled);
+  --color-waiting: var(--waiting);
+  --color-mark-white: var(--mark-white);
+  --color-primary: var(--primary-bg);
+  --color-on-primary: var(--primary-ink);
+
+  /* Older names, kept so every screen reads the same palette. */
+  --color-page: var(--ground);
+  --color-card: var(--surface);
+  --color-muted: var(--ink-2);
+  --color-accent: var(--need);
+  --color-accent-hover: var(--need);
+  --color-info: var(--ink);
+  --color-ok: var(--settled);
+  --color-warn: var(--waiting);
+  --color-bad: var(--need);
+
+  --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Titles echo the DEZENMART wordmark: wide, caps, a little tracking. Titles only. */
+@utility font-display {
+  font-family: var(--font-sans);
+  font-stretch: 125%;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+/* The petal corner: rounded on three corners, sharp on one. */
+@utility rounded-leaf {
+  border-radius: 14px 14px 14px 3px;
+}
+@utility rounded-leaf-sm {
+  border-radius: 10px 10px 10px 3px;
 }
 
 html,
 body {
-  background-color: var(--color-page);
-  color: var(--color-ink);
+  background-color: var(--ground);
+  color: var(--ink);
   font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-info);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
 dialog::backdrop {
-  background: rgb(0 0 0 / 0.6);
+  background: rgb(10 11 13 / 0.65);
+  backdrop-filter: blur(2px);
+}
+
+/* The settle: a petal closing into a circle once the server confirms. */
+@keyframes settle {
+  from {
+    border-radius: 50% 50% 0 50%;
+  }
+  to {
+    border-radius: 50%;
+  }
+}
+/* Loading: the four shapes light in turn around the centre. */
+@keyframes orbit {
+  0%,
+  100% {
+    opacity: 0.22;
+  }
+  25% {
+    opacity: 1;
+  }
+}
+/* The mark arriving at sign-in. */
+@keyframes arrive {
+  from {
+    transform: var(--from);
+    opacity: 0;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

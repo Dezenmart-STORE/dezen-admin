@@ -60,7 +60,7 @@ export function Staff() {
 
   return (
     <>
-      <PageHeader title="Staff" description="Who can use this admin, what they can do, and where." />
+      <PageHeader eyebrow="Team" title="Staff" description="Who can use this admin, what they can do, and where." />
 
       <Card className="mb-6 p-5">
         <h2 className="mb-4 font-medium">Give someone access</h2>
@@ -143,7 +143,7 @@ export function Staff() {
                     </Button>
                   )}
                   {s.authenticatorSet && !s.disabled && (
-                    <Button variant="ghost" onClick={() => setActing({ member: s, action: 'reset-authenticator' })}>
+                    <Button variant="quiet" onClick={() => setActing({ member: s, action: 'reset-authenticator' })}>
                       Reset authenticator
                     </Button>
                   )}

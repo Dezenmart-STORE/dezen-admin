@@ -13,7 +13,7 @@ export function Payments() {
   const { data, isLoading, isFetching, error } = usePaymentsQuery(list.args);
   return (
     <>
-      <PageHeader title="Payments" description="Every naira that came in or went out, newest first." />
+      <PageHeader service="platform" eyebrow="People and money" title="Payments" description="Every naira that came in or went out, newest first." />
       <ListToolbar
         q={list.q}
         status={list.status}
@@ -57,6 +57,8 @@ export function Webhooks() {
   return (
     <>
       <PageHeader
+        service="platform"
+        eyebrow="People and money"
         title="Payment notices"
         description="What the payment companies told us. A notice we could not match or trust means money may not have been recorded."
       />
@@ -107,7 +109,7 @@ export function Reconciliation() {
   const { data, isLoading, error } = useReconciliationQuery();
   return (
     <>
-      <PageHeader title="Daily balance check" description="Our records compared with what the payment companies hold, every morning. Any gap is flagged." />
+      <PageHeader service="platform" eyebrow="People and money" title="Daily balance check" description="Our records compared with what the payment companies hold, every morning. Any gap is flagged." />
       {isLoading ? (
         <Loading />
       ) : error ? (

@@ -53,6 +53,27 @@ export interface QueueItem {
   link: string;
   /** Money or safety at stake: shown first and in red. */
   urgent?: boolean;
+  /** Naira waiting in this queue (money owed, stuck or in dispute). Null when the queue is not about money. */
+  amountAtStake?: number | null;
+  /** One line on what the items are, e.g. "2 vendor payouts · 1 buyer refund". */
+  detail?: string;
+}
+
+/**
+ * What every money action returns, shown as the receipt. The backend must send it: the admin
+ * never shows money as sent from its own guess.
+ */
+export interface MoneyReceipt {
+  reference: string;
+  amount: number;
+  currency: string;
+  recipient: string;
+  /** "sent" once accepted by the bank or provider; "recorded" for a ruling or hand payment. */
+  state: 'sent' | 'recorded';
+  at: string;
+  by: string;
+  /** Where to go next in the same queue, if anything is left. */
+  next?: { label: string; link: string };
 }
 
 export interface SearchResult {
@@ -102,6 +123,14 @@ export interface FoodOrder {
   payout?: { status: MoneyStatus; amount: number; attempts: number; lastError?: string };
   refund?: { status: MoneyStatus; amount: number; attempts: number; lastError?: string };
   dispute?: { reason: string; openedAt: string; resolved: boolean };
+  /** The case file for a dispute: the other side and each party's track record. */
+  case?: {
+    vendorSays?: string;
+    whatHappened?: string;
+    buyerDisputes90d: number;
+    buyerOrders: number;
+    vendorDisputesLost: number;
+  };
   createdAt: string;
 }
 

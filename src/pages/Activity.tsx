@@ -5,11 +5,11 @@ import { useAuditQuery } from '../store/api';
 import type { AuditEvent } from '../store/types';
 import { Table } from '../components/Table';
 import { ListToolbar } from '../components/ListToolbar';
-import { Badge, PageHeader, Pagination } from '../components/ui';
+import { PageHeader, Pagination, Status } from '../components/ui';
 import { SERVICE_LABELS } from './Staff';
 
 const outcome = (e: AuditEvent) =>
-  e.outcome === 'done' ? <Badge tone="ok">Done</Badge> : e.outcome === 'refused' ? <Badge tone="bad">Refused</Badge> : <Badge tone="warn">Did not go through</Badge>;
+  e.outcome === 'done' ? <Status status="done" /> : e.outcome === 'refused' ? <Status status="failed" word="Refused" /> : <Status status="pending" word="Did not go through" />;
 
 export function Activity() {
   const list = useListParams();
@@ -17,6 +17,7 @@ export function Activity() {
   return (
     <>
       <PageHeader
+        eyebrow="Team"
         title="Activity log"
         description="Every change staff made or tried to make, and every time someone looked at full personal details. Entries cannot be edited or removed."
       />

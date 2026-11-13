@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { AuditEvent, Capability, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { AuditEvent, Capability, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -73,6 +73,21 @@ const needReason = (req: Req) => {
   return reason;
 };
 
+let refNo = 88200;
+/** What every money action returns. The admin shows this receipt; it never guesses. */
+const receipt = (
+  amount: number,
+  recipient: string,
+  state: MoneyReceipt['state'],
+  next?: MoneyReceipt['next'],
+  currency = 'NGN',
+): MoneyReceipt => ({ reference: `DZ-${++refNo}`, amount, currency, recipient, state, at: now(), by: EMAIL, next });
+/** The typed amount must match what will move. */
+const checkAmount = (req: Req, expected: number) => {
+  if (Number(req.body.amount) !== expected) throw new Fail(422, `The amount must be exactly ${expected.toLocaleString('en-NG')}`);
+};
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
 // ── queues and search ────────────────────────────────────────────────────────
 
 const queues = (): QueueItem[] => {
@@ -80,16 +95,25 @@ const queues = (): QueueItem[] => {
   const failedFood = db.foodOrders.filter((o) => o.payout?.status === 'failed' || o.refund?.status === 'failed');
   const toRefund = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
   const stuck = db.withdrawals.filter((w) => w.status === 'failed' || w.status === 'manual');
+  const foodDisputes = db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved);
+  const shopDisputes = db.shopDisputes.filter((d) => !d.ruling);
+  const failedPayouts = failedFood.filter((o) => o.payout?.status === 'failed').length;
+  const failedRefunds = failedFood.filter((o) => o.refund?.status === 'failed').length;
+  const handPay = stuck.filter((w) => w.status === 'manual').length;
+  const pendingVendors = byStatus(db.vendors, 'pending');
+  const pendingRiders = byStatus(db.riders, 'pending');
+  const reported = db.products.filter((p) => p.reports > 0 && p.visible);
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const items: QueueItem[] = [
-    { key: 'food-money', service: 'food', label: 'Food payments that failed', count: failedFood.length, oldestAt: oldest(failedFood.map((o) => o.createdAt)), link: '/food/orders?status=money_failed', urgent: true },
-    { key: 'express-refunds', service: 'express', label: 'Cancelled trips to refund', count: toRefund.length, oldestAt: oldest(toRefund.map((b) => b.createdAt)), link: '/express/bookings?status=to_refund', urgent: true },
-    { key: 'withdrawals', service: 'express', label: 'Rider withdrawals stuck', count: stuck.length, oldestAt: oldest(stuck.map((w) => w.requestedAt)), link: '/express/withdrawals?status=stuck', urgent: true },
-    { key: 'food-disputes', service: 'food', label: 'Food disputes', count: db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved).length, link: '/food/disputes' },
-    { key: 'shop-disputes', service: 'shopping', label: 'Shopping disputes', count: db.shopDisputes.filter((d) => !d.ruling).length, link: '/shopping/disputes' },
-    { key: 'vendors', service: 'food', label: 'Vendors waiting for review', count: byStatus(db.vendors, 'pending').length, oldestAt: oldest(byStatus(db.vendors, 'pending').map((v) => v.createdAt)), link: '/food/vendors?status=pending' },
-    { key: 'riders', service: 'express', label: 'Riders waiting for review', count: byStatus(db.riders, 'pending').length, oldestAt: oldest(byStatus(db.riders, 'pending').map((r) => r.createdAt)), link: '/express/riders?status=pending' },
-    { key: 'providers', service: 'express', label: 'Delivery companies waiting for review', count: byStatus(db.providers, 'pending').length, link: '/express/providers?status=pending' },
-    { key: 'products', service: 'shopping', label: 'Reported products', count: db.products.filter((p) => p.reports > 0 && p.visible).length, link: '/shopping/products?status=reported' },
+    { key: 'express-refunds', service: 'express', label: 'Cancelled trips to refund', detail: `${plural(toRefund.length, 'customer', 'customers')} paid and waiting`, count: toRefund.length, amountAtStake: sum(toRefund.map((b) => b.fare)), oldestAt: oldest(toRefund.map((b) => b.createdAt)), link: '/express/bookings?status=to_refund', urgent: true },
+    { key: 'withdrawals', service: 'express', label: 'Rider withdrawals stuck', detail: `${plural(stuck.length - handPay, 'bank failure', 'bank failures')} · ${handPay} to pay by hand`, count: stuck.length, amountAtStake: sum(stuck.map((w) => w.amount)), oldestAt: oldest(stuck.map((w) => w.requestedAt)), link: '/express/withdrawals?status=stuck', urgent: true },
+    { key: 'food-money', service: 'food', label: 'Food payments that failed', detail: `${plural(failedPayouts, 'vendor payout', 'vendor payouts')} · ${plural(failedRefunds, 'buyer refund', 'buyer refunds')}`, count: failedFood.length, amountAtStake: sum(failedFood.map((o) => (o.refund?.status === 'failed' ? o.refund.amount : (o.payout?.amount ?? 0)))), oldestAt: oldest(failedFood.map((o) => o.createdAt)), link: '/food/orders?status=money_failed', urgent: true },
+    { key: 'food-disputes', service: 'food', label: 'Food disputes', detail: 'Buyers waiting for a ruling', count: foodDisputes.length, amountAtStake: sum(foodDisputes.map((o) => o.total)), oldestAt: oldest(foodDisputes.map((o) => o.dispute!.openedAt)), link: '/food/disputes' },
+    { key: 'shop-disputes', service: 'shopping', label: 'Shopping disputes', detail: 'A buyer or seller is waiting for a ruling', count: shopDisputes.length, amountAtStake: null, oldestAt: oldest(shopDisputes.map((d) => d.openedAt)), link: '/shopping/disputes' },
+    { key: 'vendors', service: 'food', label: 'Vendors to review', detail: 'New kitchens ready to sell', count: pendingVendors.length, amountAtStake: null, oldestAt: oldest(pendingVendors.map((v) => v.createdAt)), link: '/food/vendors?status=pending' },
+    { key: 'riders', service: 'express', label: 'Riders to review', detail: 'Check licence and plate before they drive', count: pendingRiders.length, amountAtStake: null, oldestAt: oldest(pendingRiders.map((r) => r.createdAt)), link: '/express/riders?status=pending' },
+    { key: 'providers', service: 'express', label: 'Delivery companies to review', detail: 'Companies asking to deliver orders', count: byStatus(db.providers, 'pending').length, amountAtStake: null, link: '/express/providers?status=pending' },
+    { key: 'products', service: 'shopping', label: 'Reported products', detail: 'Buyers flagged these listings', count: reported.length, amountAtStake: null, link: '/shopping/products?status=reported' },
   ];
   const r = role();
   return items.filter((q) => r.services.includes('*') || r.services.includes(q.service));
@@ -188,14 +212,16 @@ const routes: Route[] = [
     needs: ['move_money', 'food'],
     code: true,
     log: (r) => `Retried the payment on ${db.foodOrders.find((o) => o.id === r.match[1])?.orderRef}`,
-    handle: ({ match }) => {
-      const o = find(db.foodOrders, match[1], 'Order');
+    handle: (req) => {
+      const o = find(db.foodOrders, req.match[1], 'Order');
       const m = o.refund?.status === 'failed' ? o.refund : o.payout?.status === 'failed' ? o.payout : undefined;
       if (!m) throw new Fail(409, 'Nothing failed on this order');
+      checkAmount(req, m.amount);
       m.status = 'processing';
       m.attempts += 1;
       addNote(o.id, 'Payment sent again');
-      return ok(o);
+      const next = db.foodOrders.find((x) => x.id !== o.id && (x.payout?.status === 'failed' || x.refund?.status === 'failed'));
+      return ok(receipt(m.amount, m === o.refund ? o.buyer.name : o.vendor.name, 'sent', next && { label: `Next failed payment: ${next.orderRef}`, link: `/food/orders/${next.id}` }));
     },
   },
   {
@@ -215,15 +241,18 @@ const routes: Route[] = [
       if (!o.dispute || o.dispute.resolved) throw new Fail(409, 'This dispute is already settled');
       needReason(req);
       o.dispute.resolved = true;
-      if (req.body.resolution === 'refund_buyer') {
+      const refund = req.body.resolution === 'refund_buyer';
+      checkAmount(req, refund ? o.total : o.subtotal);
+      if (refund) {
         o.status = 'refunded';
         o.refund = { status: 'processing', amount: o.total, attempts: 1 };
       } else {
         o.status = 'completed';
         o.payout = { status: 'processing', amount: o.subtotal, attempts: 1 };
       }
-      addNote(o.id, req.body.resolution === 'refund_buyer' ? 'Ruled: refund the buyer' : 'Ruled: pay the vendor');
-      return ok(o);
+      addNote(o.id, refund ? 'Ruled: refund the buyer' : 'Ruled: pay the vendor');
+      const next = db.foodOrders.find((x) => x.id !== o.id && x.dispute && !x.dispute.resolved);
+      return ok(receipt(refund ? o.total : o.subtotal, refund ? o.buyer.name : o.vendor.name, 'sent', next && { label: `Next dispute: ${next.orderRef}`, link: `/food/orders/${next.id}` }));
     },
   },
 
@@ -259,7 +288,7 @@ const routes: Route[] = [
       if (!(amount > 0)) throw new Fail(422, 'Enter an amount above zero');
       if (req.body.direction === 'debit' && amount > r.walletBalance) throw new Fail(409, 'That is more than the wallet holds');
       r.walletBalance += req.body.direction === 'credit' ? amount : -amount;
-      return ok(r);
+      return ok(receipt(amount, `${r.name}'s wallet, now ₦${r.walletBalance.toLocaleString('en-NG')}`, 'recorded'));
     },
   },
   {
@@ -301,7 +330,8 @@ const routes: Route[] = [
       if (Number(req.body.amount) !== b.fare) throw new Fail(422, 'The amount must match the fare paid');
       b.paymentStatus = 'refund_pending';
       addNote(b.id, 'Refund sent to the customer');
-      return ok(b);
+      const next = db.bookings.find((x) => x.id !== b.id && x.status === 'cancelled' && x.paymentStatus === 'paid');
+      return ok(receipt(b.fare, b.customer.name, 'sent', next && { label: `Next refund due: ${next.bookingRef}`, link: `/express/bookings/${next.id}` }));
     },
   },
   {
@@ -319,12 +349,13 @@ const routes: Route[] = [
     needs: ['move_money', 'express'],
     code: true,
     log: (r) => `Retried a withdrawal for ${db.withdrawals.find((w) => w.id === r.match[1])?.rider.name}`,
-    handle: ({ match }) => {
-      const w = find(db.withdrawals, match[1], 'Withdrawal');
+    handle: (req) => {
+      const w = find(db.withdrawals, req.match[1], 'Withdrawal');
       if (w.status !== 'failed') throw new Fail(409, 'Only a failed withdrawal can be sent again');
+      checkAmount(req, w.amount);
       w.status = 'processing';
       w.attempts += 1;
-      return ok(w);
+      return ok(receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'sent'));
     },
   },
   {
@@ -338,8 +369,9 @@ const routes: Route[] = [
       needReason(req);
       if (!String(req.body.transferReference ?? '').trim()) throw new Fail(422, 'Enter the bank transfer reference');
       if (w.status !== 'manual' && w.status !== 'failed') throw new Fail(409, 'This withdrawal is not waiting to be paid by hand');
+      checkAmount(req, w.amount);
       w.status = 'paid';
-      return ok(w);
+      return ok(receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'recorded'));
     },
   },
   {
@@ -399,8 +431,10 @@ const routes: Route[] = [
     handle: (req) => {
       const d = find(db.shopDisputes, req.match[1], 'Dispute');
       if (d.ruling) throw new Fail(409, 'This dispute already has a ruling');
+      checkAmount(req, d.order.amount);
       d.ruling = { resolution: req.body.resolution as 'refund_buyer' | 'release_to_seller', by: EMAIL, at: now(), note: needReason(req), carriedOut: false };
-      return ok(d);
+      const who = d.ruling.resolution === 'refund_buyer' ? d.order.buyer.name : d.order.seller.name;
+      return ok(receipt(d.order.amount, `${who}, once an owner carries it out`, 'recorded', undefined, d.order.currency));
     },
   },
   {
@@ -473,6 +507,7 @@ const routes: Route[] = [
     method: 'POST',
     path: /^\/admin\/platform\/users\/([^/]+)\/reveal$/,
     needs: ['read_pii', 'platform'],
+    code: true,
     log: (r) => `Viewed full details of ${db.people.find((p) => p.id === r.match[1])?.name}`,
     handle: (req) => {
       const p = find(db.people, req.match[1], 'Person');

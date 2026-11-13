@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FiSearch } from 'react-icons/fi';
-import { Input, Select } from './ui';
+import { Segments } from './ui';
 
-/** Search box (applied after a short pause) and an optional status filter above a list. */
+/** Above every list: the views as chips, and a search applied after a short pause. */
 export function ListToolbar({
   q,
   status,
@@ -24,21 +24,18 @@ export function ListToolbar({
     return () => clearTimeout(t);
   }, [text, q, onChange]);
   return (
-    <div className="mb-4 flex flex-wrap gap-3">
-      <label className="relative min-w-56 flex-1 sm:max-w-sm">
+    <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      {statuses && <Segments label="Show" value={status ?? ''} options={statuses} onChange={(v) => onChange({ status: v })} />}
+      <label className="relative w-full lg:max-w-xs">
         <span className="sr-only">{placeholder}</span>
-        <FiSearch aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} className="pl-9" />
+        <FiSearch aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={placeholder}
+          className="h-10 w-full rounded-leaf-sm border border-line bg-surface pl-10 pr-3 text-[14px] text-ink placeholder:text-ink-3 focus:border-ink-2 focus:outline-none"
+        />
       </label>
-      {statuses && (
-        <Select aria-label="Show" value={status ?? ''} onChange={(e) => onChange({ status: e.target.value })} className="w-auto">
-          {statuses.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
-      )}
     </div>
   );
 }

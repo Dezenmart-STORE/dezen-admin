@@ -1,25 +1,28 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { API_URL, USE_SAMPLE_DATA } from '../lib/config';
-import { PREVIEW_KEY, PREVIEW_ROLES } from '../mocks/backend';
 import { errorMessage, statusOf } from '../lib/errors';
+import { PREVIEW_KEY, PREVIEW_ROLES } from '../mocks/backend';
 import { useAppDispatch, useAppSelector } from '../store';
 import { googleSignedIn, signedOut, staffSignedIn } from '../store/session';
-import {
-  useConfirmAuthenticatorMutation,
-  useSetupAuthenticatorMutation,
-  useStartSessionMutation,
-} from '../store/api';
-import { Button, Card, CodeInput, ErrorNote, Field, InfoNote, Select, Spinner } from '../components/ui';
+import { useConfirmAuthenticatorMutation, useSetupAuthenticatorMutation, useStartSessionMutation } from '../store/api';
+import { Mark, Orbit } from '../components/brand';
+import { Button, CodeInput, ErrorNote, Field, InfoNote, Select } from '../components/ui';
 
-function Shell({ children }: { children: React.ReactNode }) {
+/** The doorway: the mark arrives into the centre, one clear action below it. */
+function Shell({ children, arrive }: { children: ReactNode; arrive?: boolean }) {
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-md p-8">
-        <p className="mb-6 text-sm font-semibold tracking-wide text-accent">DEZEN ADMIN</p>
+    <main className="grid min-h-dvh place-items-center px-5 py-10">
+      <div className="w-full max-w-[24rem]">
+        <div className="mb-10 flex flex-col items-center gap-6 text-center">
+          <Mark size={88} arrive={arrive} />
+          <p className="font-display text-[13px] tracking-[0.22em]">
+            Dezen<span className="text-ink-3"> admin</span>
+          </p>
+        </div>
         {children}
-      </Card>
+      </div>
     </main>
   );
 }
@@ -47,14 +50,13 @@ export function SignIn() {
     }
   };
   return (
-    <Shell>
-      <h1 className="mb-2 text-xl font-semibold">Staff sign-in</h1>
-      <p className="mb-6 text-sm text-muted">
-        Sign in with the Google account your access was given to. You will then enter a code from your authenticator app.
+    <Shell arrive>
+      <h1 className="text-center text-[22px] font-semibold">Welcome back</h1>
+      <p className="mx-auto mt-2 max-w-[30ch] text-center text-[14.5px] text-ink-2">
+        Sign in with the Google account your access was given to, then enter the code from your authenticator.
       </p>
-      {USE_SAMPLE_DATA && (
-        <div className="mb-4 space-y-3">
-          <InfoNote>Sample data mode. Any 6-digit code works; 000000 shows the wrong-code message.</InfoNote>
+      <div className="mt-8 space-y-4">
+        {USE_SAMPLE_DATA && (
           <Field label="Preview as">
             <Select value={preview} onChange={(e) => choose(e.target.value)}>
               {Object.entries(PREVIEW_ROLES).map(([k, r]) => (
@@ -64,14 +66,14 @@ export function SignIn() {
               ))}
             </Select>
           </Field>
-        </div>
-      )}
-      <a
-        href={href}
-        className="flex w-full items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-ink hover:bg-accent-hover"
-      >
-        {USE_SAMPLE_DATA ? 'Continue' : 'Continue with Google'}
-      </a>
+        )}
+        <a
+          href={href}
+          className="flex h-12 w-full items-center justify-center rounded-leaf-sm bg-primary text-[15px] font-semibold text-on-primary transition-opacity hover:opacity-90"
+        >
+          {USE_SAMPLE_DATA ? 'Continue' : 'Continue with Google'}
+        </a>
+      </div>
     </Shell>
   );
 }
@@ -91,11 +93,18 @@ export function AuthCallback() {
     }
   }, [token, dispatch, navigate]);
 
-  if (token) return <Shell><Spinner /></Shell>;
+  if (token)
+    return (
+      <Shell>
+        <div className="flex justify-center">
+          <Orbit />
+        </div>
+      </Shell>
+    );
   return (
     <Shell>
       <ErrorNote>{failure ?? 'Google sign-in did not complete.'}</ErrorNote>
-      <Button className="mt-4 w-full" onClick={() => navigate('/sign-in', { replace: true })}>
+      <Button variant="primary" size="lg" className="mt-4 w-full" onClick={() => navigate('/sign-in', { replace: true })}>
         Try again
       </Button>
     </Shell>
@@ -151,48 +160,45 @@ export function Verify() {
     navigate('/', { replace: true });
   };
 
+  const setupData = stage === 'setup' ? setupState.data : undefined;
+
   return (
     <Shell>
-      {stage === 'setup' && setupState.data ? (
+      {setupData ? (
         <>
-          <h1 className="mb-2 text-xl font-semibold">Set up your authenticator</h1>
-          <p className="mb-4 text-sm text-muted">
+          <h1 className="text-center text-[22px] font-semibold">Set up your authenticator</h1>
+          <p className="mx-auto mt-2 max-w-[32ch] text-center text-[14.5px] text-ink-2">
             Scan this with Google Authenticator, 1Password or a similar app, then enter the code it shows.
           </p>
-          <div className="mb-4 flex justify-center rounded-lg bg-white p-4">
-            <QRCodeSVG value={setupState.data.otpauthUrl} size={176} />
+          <div className="mx-auto mt-6 w-fit rounded-leaf bg-white p-4">
+            <QRCodeSVG value={setupData.otpauthUrl} size={168} />
           </div>
-          <p className="mb-4 break-all text-center font-mono text-xs text-muted">{setupState.data.secret}</p>
+          <p className="mt-3 break-all text-center font-mono text-[11.5px] text-ink-3">{setupData.secret}</p>
         </>
       ) : (
         <>
-          <h1 className="mb-2 text-xl font-semibold">Enter your code</h1>
+          <h1 className="text-center text-[22px] font-semibold">Enter your code</h1>
           {stage === 'next-code' ? (
-            <div className="mb-4">
+            <div className="mt-4">
               <InfoNote>Your authenticator is set up. Wait for the next code in the app, then enter it to sign in.</InfoNote>
             </div>
           ) : (
-            <p className="mb-4 text-sm text-muted">Open your authenticator app and enter the 6-digit code for Dezen Admin.</p>
+            <p className="mx-auto mt-2 max-w-[30ch] text-center text-[14.5px] text-ink-2">The 6-digit code for Dezen Admin in your authenticator app.</p>
           )}
         </>
       )}
-      <form onSubmit={submit} className="space-y-4">
-        <Field label="Code">
-          <CodeInput value={code} onChange={setCode} autoFocus />
-        </Field>
+      <form onSubmit={submit} className="mt-8 space-y-4">
+        <label htmlFor="code" className="sr-only">
+          Code
+        </label>
+        <CodeInput id="code" value={code} onChange={setCode} autoFocus />
         <ErrorNote>{error}</ErrorNote>
-        <Button
-          type="submit"
-          variant="primary"
-          className="w-full"
-          disabled={code.length !== 6}
-          busy={session.isLoading || confirmState.isLoading || setupState.isLoading}
-        >
+        <Button type="submit" variant="primary" size="lg" className="w-full" disabled={code.length !== 6} busy={session.isLoading || confirmState.isLoading || setupState.isLoading}>
           {stage === 'setup' ? 'Turn on authenticator' : 'Sign in'}
         </Button>
-        <Button variant="ghost" className="w-full" onClick={() => dispatch(signedOut())}>
+        <button type="button" onClick={() => dispatch(signedOut())} className="block w-full cursor-pointer py-2 text-center text-[13px] text-ink-3 hover:text-ink">
           Use a different Google account
-        </Button>
+        </button>
       </form>
     </Shell>
   );

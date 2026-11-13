@@ -1,199 +1,302 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { Service } from '../store/types';
+import { Orbit, ServiceGlyph, StatusShape, type Shape } from './brand';
 
-/** Shared building blocks. Pages use these rather than styling their own. */
+/**
+ * The admin's building blocks. Every page uses these rather than styling its own.
+ * Primary = the mark's white. Red only for "needs a person" and "cannot be undone".
+ */
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
+type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-accent text-ink hover:bg-accent-hover',
-  secondary: 'bg-raised text-ink border border-line hover:border-muted',
-  danger: 'bg-transparent text-bad border border-bad/50 hover:bg-bad/10',
-  ghost: 'bg-transparent text-muted hover:text-ink',
+  primary: 'bg-primary text-on-primary hover:opacity-90',
+  secondary: 'bg-surface text-ink border border-line hover:border-ink-3',
+  quiet: 'bg-transparent text-ink-2 hover:text-ink hover:bg-raised',
+  danger: 'bg-transparent text-need border border-need/45 hover:bg-need/10',
 };
 
 export function Button({
   variant = 'secondary',
+  size = 'md',
   busy,
   className = '',
   children,
   disabled,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; busy?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; busy?: boolean }) {
+  const sizes = { sm: 'h-8 px-3 text-[13px]', md: 'h-10 px-4 text-sm', lg: 'h-12 px-5 text-[15px]' };
   return (
     <button
       type="button"
       {...rest}
       disabled={disabled || busy}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
+      aria-busy={busy || undefined}
+      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-leaf-sm font-semibold transition-[background-color,border-color,opacity,color] duration-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${sizes[size]} ${variants[variant]} ${className}`}
     >
-      {busy && <Spinner small />}
+      {busy && <Orbit size={14} label="Working" />}
       {children}
     </button>
   );
 }
 
-export function Spinner({ small }: { small?: boolean }) {
+/** An action this person's role can't take: shown, not hidden, with who can. */
+export function Locked({ children, who }: { children: ReactNode; who: string }) {
   return (
-    <span
-      role="status"
-      aria-label="Loading"
-      className={`inline-block animate-spin rounded-full border-2 border-muted border-t-transparent ${small ? 'h-3.5 w-3.5' : 'h-6 w-6'}`}
-    />
+    <span className="inline-flex flex-col items-start gap-1">
+      <Button disabled title={`${who} can do this`}>
+        {children}
+      </Button>
+      <span className="text-[11.5px] text-ink-3">{who} can do this</span>
+    </span>
   );
 }
 
-export function Loading() {
+export function Loading({ label = 'Loading' }: { label?: string }) {
   return (
-    <div className="flex justify-center py-12">
-      <Spinner />
+    <div className="flex justify-center py-16">
+      <Orbit size={30} label={label} />
     </div>
   );
 }
 
-type Tone = 'neutral' | 'ok' | 'warn' | 'bad' | 'info';
-const tones: Record<Tone, string> = {
-  neutral: 'bg-raised text-muted',
-  ok: 'bg-ok/15 text-ok',
-  warn: 'bg-warn/15 text-warn',
-  bad: 'bg-bad/15 text-bad',
-  info: 'bg-info/15 text-info',
+// ── status ───────────────────────────────────────────────────────────────────
+
+type Tone = 'need' | 'settled' | 'waiting' | 'quiet';
+
+const STATUS: Record<string, { word: string; shape: Shape; tone: Tone }> = {
+  failed: { word: 'Failed', shape: 'petal', tone: 'need' },
+  disputed: { word: 'Disputed', shape: 'petal', tone: 'need' },
+  refund_failed: { word: 'Refund failed', shape: 'petal', tone: 'need' },
+  to_refund: { word: 'Refund due', shape: 'petal', tone: 'need' },
+  manual: { word: 'Pay by hand', shape: 'petal', tone: 'waiting' },
+  pending: { word: 'Waiting', shape: 'ring', tone: 'waiting' },
+  processing: { word: 'Sending', shape: 'ring', tone: 'waiting' },
+  unpaid: { word: 'Not paid yet', shape: 'ring', tone: 'quiet' },
+  accepted: { word: 'Accepted', shape: 'ring', tone: 'waiting' },
+  rider_accepted: { word: 'Rider confirmed', shape: 'ring', tone: 'waiting' },
+  preparing: { word: 'Preparing', shape: 'ring', tone: 'waiting' },
+  ready: { word: 'Ready', shape: 'ring', tone: 'waiting' },
+  picked_up: { word: 'Picked up', shape: 'ring', tone: 'waiting' },
+  in_transit: { word: 'On the way', shape: 'ring', tone: 'waiting' },
+  shipped: { word: 'Shipped', shape: 'ring', tone: 'waiting' },
+  refund_pending: { word: 'Refund sent', shape: 'ring', tone: 'waiting' },
+  delivered: { word: 'Delivered', shape: 'circle', tone: 'settled' },
+  completed: { word: 'Completed', shape: 'circle', tone: 'settled' },
+  paid: { word: 'Paid', shape: 'circle', tone: 'settled' },
+  success: { word: 'Done', shape: 'circle', tone: 'settled' },
+  refunded: { word: 'Refunded', shape: 'circle', tone: 'settled' },
+  approved: { word: 'Approved', shape: 'circle', tone: 'settled' },
+  verified: { word: 'Approved', shape: 'circle', tone: 'settled' },
+  done: { word: 'Done', shape: 'circle', tone: 'settled' },
+  rejected: { word: 'Rejected', shape: 'circle', tone: 'quiet' },
+  cancelled: { word: 'Cancelled', shape: 'circle', tone: 'quiet' },
+  suspended: { word: 'Suspended', shape: 'petal', tone: 'need' },
+  reversed: { word: 'Reversed', shape: 'circle', tone: 'quiet' },
 };
 
-export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
-}
+const TONE_TEXT: Record<Tone, string> = { need: 'text-need', settled: 'text-settled', waiting: 'text-waiting', quiet: 'text-ink-3' };
 
-/** Words the operator reads for a status the backend sends. */
-const STATUS_WORDS: Record<string, string> = {
-  rider_accepted: 'Rider confirmed',
-  in_transit: 'On the way',
-  picked_up: 'Picked up',
-  refund_pending: 'Refund sent',
-  refund_failed: 'Refund failed',
-  manual: 'Pay by hand',
-  verified: 'Approved',
-};
-
-/** A status word coloured by what it means for the operator. */
-export function StatusBadge({ status }: { status: string }) {
-  const tone: Tone = /approved|verified|completed|delivered|paid|success|released|^done$|refunded/.test(status)
-    ? 'ok'
-    : /pending|awaiting|processing|preparing|ready|in_transit|accepted|picked_up|shipped|manual/.test(status)
-      ? 'warn'
-      : /rejected|failed|suspended|disputed|cancel|refused/.test(status)
-        ? 'bad'
-        : 'neutral';
-  const words = STATUS_WORDS[status] ?? status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
-  return <Badge tone={tone}>{words}</Badge>;
-}
-
-export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
+/** A status: its shape and its word. Petal = needs a person, ring = on its way, circle = settled. */
+export function Status({ status, word }: { status: string; word?: string }) {
+  const s = STATUS[status] ?? { word: status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' '), shape: 'circle' as Shape, tone: 'quiet' as Tone };
   return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold">{title}</h1>
-        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-medium ${TONE_TEXT[s.tone]}`}>
+      <StatusShape shape={s.shape} tone={s.tone} size={9} />
+      {word ?? s.word}
+    </span>
+  );
+}
+/** Kept for older call sites. */
+export const StatusBadge = Status;
+
+/** A neutral tag (roles, categories). Not for status: use Status. */
+export function Tag({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'need' | 'settled' | 'waiting' }) {
+  const t = { neutral: 'border-line text-ink-2', need: 'border-need/40 text-need', settled: 'border-settled/40 text-settled', waiting: 'border-waiting/40 text-waiting' }[tone];
+  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11.5px] font-medium ${t}`}>{children}</span>;
+}
+/** Kept for older call sites. */
+export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'ok' | 'warn' | 'bad' | 'info' }) {
+  const map = { neutral: 'neutral', ok: 'settled', warn: 'waiting', bad: 'need', info: 'neutral' } as const;
+  return <Tag tone={map[tone]}>{children}</Tag>;
+}
+
+// ── money ────────────────────────────────────────────────────────────────────
+
+const naira = new Intl.NumberFormat('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Money, always in full with its currency. Never abbreviated. */
+export function Money({ amount, currency = 'NGN', className = '' }: { amount: number | null | undefined; currency?: string; className?: string }) {
+  if (typeof amount !== 'number') return <span className="text-ink-3">—</span>;
+  const text = currency === 'NGN' ? `₦${naira.format(amount)}` : `${amount.toLocaleString('en-NG')} ${currency}`;
+  return <span className={`font-mono font-medium whitespace-nowrap ${className}`}>{text}</span>;
+}
+
+// ── layout pieces ────────────────────────────────────────────────────────────
+
+export function PageHeader({
+  title,
+  description,
+  actions,
+  service,
+  eyebrow,
+}: {
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+  service?: Service;
+  eyebrow?: string;
+}) {
+  return (
+    <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        {(eyebrow || service) && (
+          <p className="mb-2.5 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">
+            {service && <ServiceGlyph service={service} size={15} />}
+            {eyebrow}
+          </p>
+        )}
+        <h1 className="font-display text-[26px] leading-[1.05] sm:text-[30px] text-balance">{title}</h1>
+        {description && <p className="mt-2 max-w-[62ch] text-[14.5px] text-ink-2">{description}</p>}
       </div>
-      {actions && <div className="flex gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </header>
   );
 }
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-xl border border-line bg-card ${className}`}>{children}</section>;
+  return <section className={`rounded-leaf border border-line bg-surface ${className}`}>{children}</section>;
+}
+
+export function SectionTitle({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
+  return (
+    <div className="mb-3 flex items-baseline justify-between gap-3">
+      <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-ink-3">{children}</h2>
+      {aside}
+    </div>
+  );
 }
 
 export function ErrorNote({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p role="alert" className="rounded-lg border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">
-      {children}
+    <p role="alert" className="flex items-start gap-2.5 rounded-leaf-sm border border-need/35 bg-need/[0.07] px-3.5 py-2.5 text-sm text-ink">
+      <span className="mt-[5px]">
+        <StatusShape shape="petal" tone="need" size={9} />
+      </span>
+      <span>{children}</span>
     </p>
   );
 }
 
 export function InfoNote({ children }: { children: ReactNode }) {
-  return <p className="rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm text-info">{children}</p>;
+  return (
+    <p className="flex items-start gap-2.5 rounded-leaf-sm border border-line bg-raised px-3.5 py-2.5 text-sm text-ink-2">
+      <span className="mt-[5px]">
+        <StatusShape shape="ring" tone="quiet" size={9} />
+      </span>
+      <span>{children}</span>
+    </p>
+  );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-4 py-12 text-center text-sm text-muted">{children}</p>;
+/** Nothing to show. When a queue is empty, it reads as settled: four circles. */
+export function Empty({ children, settled }: { children: ReactNode; settled?: boolean }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+      {settled && (
+        <span aria-hidden className="grid grid-cols-2 gap-1">
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className="h-2.5 w-2.5 rounded-full bg-settled" style={{ opacity: 0.4 + i * 0.2 }} />
+          ))}
+        </span>
+      )}
+      <p className="text-sm text-ink-2">{children}</p>
+    </div>
+  );
 }
 
-export function Tabs<T extends string>({
+/** Choose one view: filter chips that scroll sideways on a phone. */
+export function Segments<T extends string>({
   value,
   options,
   onChange,
   label,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; count?: number }[];
   onChange: (v: T) => void;
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="mb-4 flex flex-wrap gap-1 rounded-lg border border-line bg-card p-1 w-fit">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="tab"
-          aria-selected={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={`rounded-md px-3 py-1.5 text-sm cursor-pointer ${value === o.value ? 'bg-raised text-ink' : 'text-muted hover:text-ink'}`}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div role="radiogroup" aria-label={label} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+      {options.map((o) => {
+        const on = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(o.value)}
+            className={`h-8 shrink-0 cursor-pointer rounded-full border px-3.5 text-[13px] font-medium transition-colors ${on ? 'border-transparent bg-primary text-on-primary' : 'border-line text-ink-2 hover:text-ink hover:border-ink-3'}`}
+          >
+            {o.label}
+            {typeof o.count === 'number' && <span className={`ml-1.5 font-mono text-[11.5px] ${on ? 'opacity-70' : 'text-ink-3'}`}>{o.count}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
+/** Kept for older call sites. */
+export const Tabs = Segments;
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium">{label}</span>
+      <span className="mb-1.5 block text-[13px] font-semibold">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-xs text-ink-3">{hint}</span>}
     </label>
   );
 }
 
 const control =
-  'w-full rounded-lg border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-info focus:outline-none';
+  'h-11 w-full rounded-leaf-sm border border-line bg-ground px-3.5 text-[14.5px] text-ink placeholder:text-ink-3 transition-colors focus:border-ink-2 focus:outline-none';
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${control} ${props.className ?? ''}`} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={`${control} ${props.className ?? ''}`} />;
+  return <select {...props} className={`${control} cursor-pointer pr-8 ${props.className ?? ''}`} />;
 }
 
-/** Six-digit authenticator code input. */
-export function CodeInput({ value, onChange, autoFocus }: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
+/** Six-digit authenticator code. */
+export function CodeInput({ value, onChange, autoFocus, id }: { value: string; onChange: (v: string) => void; autoFocus?: boolean; id?: string }) {
   return (
     <Input
+      id={id}
       inputMode="numeric"
       autoComplete="one-time-code"
       pattern="\d{6}"
       maxLength={6}
-      placeholder="123456"
+      placeholder="• • • • • •"
       autoFocus={autoFocus}
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
-      className="text-center text-lg tracking-[0.4em] font-mono"
+      className="text-center font-mono text-xl tracking-[0.5em]"
     />
   );
 }
 
-/** Label → value pairs for a record's details. */
+/** Label → value pairs for a record's facts. */
 export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-6 gap-y-2 text-sm">
+    <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-6 gap-y-2.5 text-sm">
       {rows.map(([k, v]) => (
         <div key={k} className="contents">
-          <dt className="text-muted">{k}</dt>
+          <dt className="text-ink-3">{k}</dt>
           <dd className="min-w-0 break-words">{v ?? '—'}</dd>
         </div>
       ))}
@@ -205,18 +308,23 @@ export function Pagination({ page, total, limit, onChange, busy }: { page: numbe
   const pages = Math.max(1, Math.ceil(total / limit));
   if (pages <= 1) return null;
   return (
-    <nav aria-label="Pages" className="mt-4 flex items-center justify-end gap-3 text-sm text-muted">
-      <Button disabled={page <= 1 || busy} onClick={() => onChange(page - 1)}>
-        Previous
-      </Button>
-      Page {page} of {pages}
-      <Button disabled={page >= pages || busy} onClick={() => onChange(page + 1)}>
-        Next
-      </Button>
+    <nav aria-label="Pages" className="mt-5 flex items-center justify-between gap-3 text-sm text-ink-3">
+      <span className="font-mono text-xs">
+        {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
+      </span>
+      <span className="flex gap-2">
+        <Button size="sm" disabled={page <= 1 || busy} onClick={() => onChange(page - 1)}>
+          Previous
+        </Button>
+        <Button size="sm" disabled={page >= pages || busy} onClick={() => onChange(page + 1)}>
+          Next
+        </Button>
+      </span>
     </nav>
   );
 }
 
-export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">{children}</h2>;
+/** A spinner inside a button or a small space. */
+export function Spinner({ small }: { small?: boolean }) {
+  return <Orbit size={small ? 14 : 24} />;
 }

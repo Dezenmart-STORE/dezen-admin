@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { errorMessage, failureOf } from '../../lib/errors';
-import { formatDate, formatNaira } from '../../lib/format';
+import { errorMessage, failureOf, receiptOf } from '../../lib/errors';
+import { formatDate, humanize } from '../../lib/format';
 import { useListParams } from '../../lib/useListParams';
 import { useCan } from '../../store';
 import { useAdjustRiderWalletMutation, useRidersQuery, useVerifyRiderMutation } from '../../store/api';
 import type { Rider } from '../../store/types';
 import { Table } from '../../components/Table';
-import { ConfirmDialog, ConfirmWithCode } from '../../components/Dialog';
+import { ConfirmDialog, MoneySheet } from '../../components/Dialog';
 import { ListToolbar } from '../../components/ListToolbar';
-import { Badge, Button, Field, Input, PageHeader, Pagination, Select, StatusBadge } from '../../components/ui';
+import { WHO } from '../../components/Choice';
+import { Button, Field, Input, Money, PageHeader, Pagination, Segments, Status, Tag } from '../../components/ui';
 
 export function Riders() {
   const can = useCan();
@@ -19,39 +20,79 @@ export function Riders() {
   const [acting, setActing] = useState<{ rider: Rider; to: 'verified' | 'rejected' } | null>(null);
   const [wallet, setWallet] = useState<Rider | null>(null);
   const [amount, setAmount] = useState('');
-  const [direction, setDirection] = useState<'credit' | 'debit'>('credit');
-  const amountNumber = Number(amount.replace(/[,\s₦]/g, ''));
+  const [direction, setDirection] = useState<'credit' | 'debit'>('debit');
+  const value = Number(amount.replace(/[,\s₦]/g, ''));
+  const after = wallet ? wallet.walletBalance + (direction === 'credit' ? value : -value) : 0;
+  const valid = value > 0 && after >= 0;
+
+  const actions = (r: Rider) => (
+    <div className="flex flex-wrap justify-end gap-2">
+      {can('verify', 'express') && r.status !== 'verified' && (
+        <Button size="sm" variant="primary" onClick={() => setActing({ rider: r, to: 'verified' })}>
+          Approve
+        </Button>
+      )}
+      {can('verify', 'express') && r.status === 'pending' && (
+        <Button size="sm" variant="danger" onClick={() => setActing({ rider: r, to: 'rejected' })}>
+          Reject
+        </Button>
+      )}
+      {r.status === 'verified' &&
+        (can('move_money', 'express') ? (
+          <Button
+            size="sm"
+            variant="quiet"
+            onClick={() => {
+              setWallet(r);
+              setAmount('');
+              setDirection('debit');
+            }}
+          >
+            Correct wallet
+          </Button>
+        ) : null)}
+      {!can('verify', 'express') && r.status === 'pending' && <span className="text-[12px] text-ink-3">{WHO.verify} decide</span>}
+    </div>
+  );
 
   return (
     <>
-      <PageHeader title="Riders" description="People who drive and deliver for DezenExpress." />
+      <PageHeader service="express" eyebrow="DezenExpress" title="Riders" description="The people who drive and deliver. Approve only after checking the licence and plate against their documents." />
       <ListToolbar
         q={list.q}
         status={list.status}
-        placeholder="Search by name or plate number"
+        placeholder="Name or plate number"
         statuses={[
-          { value: 'pending', label: 'Waiting for review' },
+          { value: 'pending', label: 'To review' },
           { value: 'verified', label: 'Approved' },
           { value: 'rejected', label: 'Rejected' },
-          { value: '', label: 'All riders' },
+          { value: '', label: 'All' },
         ]}
         onChange={list.set}
       />
       <Table
         rows={data?.items}
         loading={isLoading}
+        fetching={isFetching}
         error={errorMessage(error)}
         rowKey={(r) => r.id}
         empty={list.status === 'pending' ? 'No riders are waiting for review.' : 'No riders match.'}
+        settledWhenEmpty={list.status === 'pending'}
+        mobile={(r) => ({
+          title: r.name,
+          subtitle: `${r.vehicleType} · ${r.plateNumber}`,
+          amount: actions(r),
+          status: <Status status={r.status} />,
+        })}
         columns={[
           {
             header: 'Rider',
             cell: (r) => (
               <>
-                <p className="font-medium">
-                  {r.name} {r.online && <Badge tone="ok">Online</Badge>}
+                <p className="flex items-center gap-2 font-semibold">
+                  {r.name} {r.online && <Tag tone="settled">Online</Tag>}
                 </p>
-                <p className="text-xs text-muted">
+                <p className="text-[12.5px] text-ink-3">
                   {r.email} · {r.phone}
                 </p>
               </>
@@ -60,10 +101,10 @@ export function Riders() {
           {
             header: 'Vehicle and licence',
             cell: (r) => (
-              <span className="text-xs">
-                {r.vehicleType} · {r.plateNumber}
+              <span className="text-[12.5px]">
+                {humanize(r.vehicleType)} · <span className="font-mono">{r.plateNumber}</span>
                 <br />
-                <span className="text-muted">Licence {r.licenceNumber}</span>
+                <span className="font-mono text-ink-3">{r.licenceNumber}</span>
               </span>
             ),
           },
@@ -71,35 +112,18 @@ export function Riders() {
             header: 'Paid to',
             cell: (r) =>
               r.payoutAccount ? (
-                <span className="text-xs">
-                  {r.payoutAccount.bankName} · {r.payoutAccount.accountNumberMasked}
+                <span className="font-mono text-[12.5px]">
+                  {r.payoutAccount.bankName} {r.payoutAccount.accountNumberMasked}
                 </span>
               ) : (
-                <span className="text-xs text-muted">No checked account: withdrawals are paid by hand</span>
+                <span className="text-[12.5px] text-waiting">No checked account · paid by hand</span>
               ),
           },
-          { header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
-          { header: 'Trips', cell: (r) => r.tripsCompleted, className: 'text-right' },
-          { header: 'Wallet', cell: (r) => formatNaira(r.walletBalance), className: 'whitespace-nowrap text-right' },
-          { header: 'Applied', cell: (r) => <span className="whitespace-nowrap text-xs text-muted">{formatDate(r.createdAt)}</span> },
-          {
-            header: '',
-            cell: (r) => (
-              <div className="flex flex-wrap justify-end gap-2">
-                {can('verify', 'express') && r.status !== 'verified' && <Button onClick={() => setActing({ rider: r, to: 'verified' })}>Approve</Button>}
-                {can('verify', 'express') && r.status === 'pending' && (
-                  <Button variant="danger" onClick={() => setActing({ rider: r, to: 'rejected' })}>
-                    Reject
-                  </Button>
-                )}
-                {can('move_money', 'express') && r.status === 'verified' && (
-                  <Button variant="ghost" onClick={() => { setWallet(r); setAmount(''); setDirection('credit'); }}>
-                    Correct wallet
-                  </Button>
-                )}
-              </div>
-            ),
-          },
+          { header: 'Status', cell: (r) => <Status status={r.status} /> },
+          { header: 'Trips', align: 'right', cell: (r) => <span className="font-mono">{r.tripsCompleted}</span> },
+          { header: 'Wallet', align: 'right', cell: (r) => <Money amount={r.walletBalance} /> },
+          { header: 'Applied', cell: (r) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(r.createdAt)}</span> },
+          { header: '', cell: actions },
         ]}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}
@@ -108,38 +132,53 @@ export function Riders() {
         title={acting ? `${acting.to === 'verified' ? 'Approve' : 'Reject'} ${acting.rider.name}` : ''}
         summary={
           acting?.to === 'verified'
-            ? 'They can go online and take rides and deliveries. Check the licence and plate number against their documents first.'
-            : 'They cannot go online. They are told the reason.'
+            ? `${acting.rider.name} can go online and take rides and deliveries. Licence ${acting.rider.licenceNumber}, plate ${acting.rider.plateNumber}.`
+            : 'They cannot go online, and they are told the reason.'
         }
-        actionLabel={acting?.to === 'verified' ? 'Approve' : 'Reject'}
+        actionLabel={acting ? `${acting.to === 'verified' ? 'Approve' : 'Reject'} ${acting.rider.name.split(' ')[0]}` : ''}
         askReason={acting?.to === 'rejected'}
-        reasonHint="The rider sees this"
+        reasonHint="The rider sees this."
         danger={acting?.to === 'rejected'}
         onClose={() => setActing(null)}
         onConfirm={async (reason) => failureOf(await verify({ id: acting!.rider.id, status: acting!.to, reason }))}
       />
-      <ConfirmWithCode
-        open={!!wallet}
-        title={`Correct ${wallet?.name ?? ''}'s wallet`}
-        summary={`For a trip that was paid wrongly. The wallet holds ${formatNaira(wallet?.walletBalance)} now.`}
-        actionLabel={amountNumber > 0 ? `${direction === 'credit' ? 'Add' : 'Take'} ${formatNaira(amountNumber)}` : 'Correct wallet'}
-        askReason
-        extraReady={amountNumber > 0}
-        onClose={() => setWallet(null)}
-        onConfirm={async ({ code, reason }) => failureOf(await adjust({ id: wallet!.id, amount: amountNumber, direction, code, reason }))}
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Change">
-            <Select value={direction} onChange={(e) => setDirection(e.target.value as 'credit' | 'debit')}>
-              <option value="credit">Add money</option>
-              <option value="debit">Take money</option>
-            </Select>
+      {wallet && (
+        <MoneySheet
+          open={!!wallet}
+          eyebrow={`${wallet.name} · wallet`}
+          title="Correct the wallet"
+          amount={valid ? value : 0}
+          recipient={{ name: `${wallet.name}'s wallet`, detail: 'Inside DezenExpress; nothing goes to a bank' }}
+          consequence={
+            <>
+              Wallet now <Money amount={wallet.walletBalance} /> → after{' '}
+              <span className={after < 0 ? 'font-semibold text-need' : 'font-semibold text-ink'}>
+                <Money amount={after} />
+              </span>
+              . Use this only to fix a trip that was paid wrongly.
+            </>
+          }
+          irreversible={false}
+          danger={direction === 'debit'}
+          extraReady={valid}
+          actionLabel={valid ? `${direction === 'credit' ? 'Add' : 'Take'} ₦${value.toLocaleString('en-NG')} ${direction === 'credit' ? 'to' : 'from'} ${wallet.name.split(' ')[0]}` : 'Enter an amount'}
+          onClose={() => setWallet(null)}
+          onConfirm={async ({ code, reason }) => receiptOf(await adjust({ id: wallet.id, amount: value, direction, code, reason }))}
+        >
+          <Segments
+            label="Change"
+            value={direction}
+            onChange={setDirection}
+            options={[
+              { value: 'debit', label: 'Take money' },
+              { value: 'credit', label: 'Add money' },
+            ]}
+          />
+          <Field label="Amount (₦)" hint={after < 0 ? 'That is more than the wallet holds.' : undefined}>
+            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className="font-mono" />
           </Field>
-          <Field label="Amount (₦)">
-            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
-          </Field>
-        </div>
-      </ConfirmWithCode>
+        </MoneySheet>
+      )}
     </>
   );
 }

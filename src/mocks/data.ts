@@ -136,6 +136,16 @@ export const foodOrders: FoodOrder[] = Array.from({ length: 36 }, (_, i) => {
       status === 'disputed'
         ? { reason: pick(['Food arrived cold and half the order was missing', 'Order never arrived', 'Wrong meal delivered']), openedAt: ago(int(3, 40)), resolved: false }
         : undefined,
+    case:
+      status === 'disputed'
+        ? {
+            vendorSays: pick(['All items left the kitchen hot and sealed.', 'The rider collected the full order; we have the photo.', 'We were not told anything was wrong until now.']),
+            whatHappened: pick(['Delivered 99 minutes after pickup. This route usually takes 35.', 'Rider marked it delivered 2 km from the address.', 'Delivered on time; buyer opened the dispute 3 hours later.']),
+            buyerDisputes90d: int(0, 3),
+            buyerOrders: int(2, 40),
+            vendorDisputesLost: int(0, 4),
+          }
+        : undefined,
     createdAt: ago(int(1, 200)),
   };
 });

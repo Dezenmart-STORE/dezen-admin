@@ -16,6 +16,7 @@ import type {
   Envelope,
   FoodOrder,
   FoodOrderDetail,
+  MoneyReceipt,
   Page,
   Payment,
   PersonDetail,
@@ -142,8 +143,9 @@ export const api = createApi({
       providesTags: ['FoodOrders'],
       transformResponse: unwrap,
     }),
-    retryFoodMoney: b.mutation<unknown, { id: string } & CodeArgs>({
-      query: ({ id, code }) => ({ url: `/admin/food/orders/${id}/retry-money`, method: 'POST', headers: withCode(code) }),
+    retryFoodMoney: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
+      query: ({ id, code, amount }) => ({ url: `/admin/food/orders/${id}/retry-money`, method: 'POST', body: { amount }, headers: withCode(code) }),
+      transformResponse: unwrap,
       invalidatesTags: ['FoodOrders', 'Queues', 'Audit'],
     }),
     foodDisputes: b.query<Page<FoodOrder>, PageArgs>({
@@ -151,11 +153,12 @@ export const api = createApi({
       providesTags: ['FoodOrders'],
       transformResponse: unwrap,
     }),
-    resolveFoodDispute: b.mutation<unknown, { id: string; resolution: 'refund_buyer' | 'release_to_vendor' } & CodeArgs>({
-      query: ({ id, code, resolution, reason }) => ({
+    resolveFoodDispute: b.mutation<MoneyReceipt, { id: string; resolution: 'refund_buyer' | 'release_to_vendor'; amount: number } & CodeArgs>({
+      transformResponse: unwrap,
+      query: ({ id, code, resolution, reason, amount }) => ({
         url: `/admin/food/disputes/${id}/resolve`,
         method: 'POST',
-        body: { resolution, note: reason },
+        body: { resolution, note: reason, amount },
         headers: withCode(code),
       }),
       invalidatesTags: ['FoodOrders', 'Queues', 'Audit'],
@@ -171,7 +174,7 @@ export const api = createApi({
       query: ({ id, ...body }) => ({ url: `/admin/express/riders/${id}/verify`, method: 'PATCH', body }),
       invalidatesTags: ['Riders', 'Queues', 'Audit'],
     }),
-    adjustRiderWallet: b.mutation<unknown, { id: string; amount: number; direction: 'credit' | 'debit' } & CodeArgs>({
+    adjustRiderWallet: b.mutation<MoneyReceipt, { id: string; amount: number; direction: 'credit' | 'debit' } & CodeArgs>({
       query: ({ id, code, amount, direction, reason }) => ({
         url: `/admin/express/riders/${id}/wallet-adjustments`,
         method: 'POST',
@@ -179,6 +182,7 @@ export const api = createApi({
         headers: withCode(code),
       }),
       invalidatesTags: ['Riders', 'Audit'],
+      transformResponse: unwrap,
     }),
     bookings: b.query<Page<Booking>, PageArgs>({
       query: (params) => ({ url: '/admin/express/bookings', params }),
@@ -190,7 +194,7 @@ export const api = createApi({
       providesTags: ['Bookings'],
       transformResponse: unwrap,
     }),
-    refundBooking: b.mutation<unknown, { id: string; amount: number } & CodeArgs>({
+    refundBooking: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
       query: ({ id, code, amount, reason }) => ({
         url: `/admin/express/bookings/${id}/refund`,
         method: 'POST',
@@ -198,21 +202,24 @@ export const api = createApi({
         headers: withCode(code),
       }),
       invalidatesTags: ['Bookings', 'Queues', 'Audit'],
+      transformResponse: unwrap,
     }),
     withdrawals: b.query<Page<Withdrawal>, PageArgs>({
       query: (params) => ({ url: '/admin/express/withdrawals', params }),
       providesTags: ['Withdrawals'],
       transformResponse: unwrap,
     }),
-    retryWithdrawal: b.mutation<unknown, { id: string } & CodeArgs>({
-      query: ({ id, code }) => ({ url: `/admin/express/withdrawals/${id}/retry`, method: 'POST', headers: withCode(code) }),
+    retryWithdrawal: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
+      query: ({ id, code, amount }) => ({ url: `/admin/express/withdrawals/${id}/retry`, method: 'POST', body: { amount }, headers: withCode(code) }),
+      transformResponse: unwrap,
       invalidatesTags: ['Withdrawals', 'Queues', 'Audit'],
     }),
-    markWithdrawalPaid: b.mutation<unknown, { id: string; transferReference: string } & CodeArgs>({
-      query: ({ id, code, transferReference, reason }) => ({
+    markWithdrawalPaid: b.mutation<MoneyReceipt, { id: string; transferReference: string; amount: number } & CodeArgs>({
+      transformResponse: unwrap,
+      query: ({ id, code, transferReference, reason, amount }) => ({
         url: `/admin/express/withdrawals/${id}/mark-paid`,
         method: 'POST',
-        body: { transferReference, reason },
+        body: { transferReference, reason, amount },
         headers: withCode(code),
       }),
       invalidatesTags: ['Withdrawals', 'Queues', 'Audit'],
@@ -243,11 +250,12 @@ export const api = createApi({
       providesTags: ['ShopDisputes'],
       transformResponse: unwrap,
     }),
-    ruleShopDispute: b.mutation<unknown, { id: string; resolution: 'refund_buyer' | 'release_to_seller' } & CodeArgs>({
-      query: ({ id, code, resolution, reason }) => ({
+    ruleShopDispute: b.mutation<MoneyReceipt, { id: string; resolution: 'refund_buyer' | 'release_to_seller'; amount: number } & CodeArgs>({
+      transformResponse: unwrap,
+      query: ({ id, code, resolution, reason, amount }) => ({
         url: `/admin/shopping/disputes/${id}/ruling`,
         method: 'POST',
-        body: { resolution, note: reason },
+        body: { resolution, note: reason, amount },
         headers: withCode(code),
       }),
       invalidatesTags: ['ShopDisputes', 'Queues', 'Audit'],
@@ -285,8 +293,8 @@ export const api = createApi({
       providesTags: ['People'],
       transformResponse: unwrap,
     }),
-    revealPerson: b.mutation<PersonPrivate, { id: string; reason: string }>({
-      query: ({ id, reason }) => ({ url: `/admin/platform/users/${id}/reveal`, method: 'POST', body: { reason } }),
+    revealPerson: b.mutation<PersonPrivate, { id: string; reason: string; code: string }>({
+      query: ({ id, reason, code }) => ({ url: `/admin/platform/users/${id}/reveal`, method: 'POST', body: { reason }, headers: withCode(code) }),
       invalidatesTags: ['Audit'],
       transformResponse: unwrap,
     }),

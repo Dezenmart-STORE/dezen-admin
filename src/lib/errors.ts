@@ -19,3 +19,7 @@ export const statusOf = (error: unknown): number | string | undefined =>
 
 /** null when a mutation worked, otherwise the message to show in its dialog. */
 export const failureOf = (res: { error?: FetchBaseQueryError | SerializedError }) => (res.error ? errorMessage(res.error) : null);
+
+/** A money mutation's result, as the money sheet wants it: the receipt, or the message to show. */
+export const receiptOf = <T,>(res: { data?: T; error?: FetchBaseQueryError | SerializedError }) =>
+  res.error ? { error: errorMessage(res.error) } : { receipt: res.data as never };
