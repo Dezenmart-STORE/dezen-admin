@@ -116,6 +116,87 @@ export interface MoneyReceipt {
   next?: { label: string; link: string };
 }
 
+/**
+ * Home, built around the signed-in person's shift: the one thing to take next, the work grouped by
+ * what they will do, the people settled today, and each service's state for the living mark.
+ * The backend tailors all of it to the person's capabilities and services.
+ */
+export interface HomeData {
+  /** People waiting longer than their promise (24h for money, 48h for rulings and reviews). */
+  latePeople: number;
+  waitingPeople: number;
+  oldestAt?: string;
+  /** The most urgent thing this person can act on now, or null when nothing is waiting. */
+  next: HomeNext | null;
+  groups: HomeGroup[];
+  today: HomeToday;
+  /** One entry per service the person covers, for the living mark. */
+  services: HomeService[];
+}
+
+export interface HomeNext {
+  /** "Rider withdrawal", "Refund due", "Dispute", "Approval". */
+  kind: string;
+  service: Service;
+  /** A sentence with the person first: "Musa Eze has waited 5 days for ₦25,500". */
+  title: string;
+  /** Why it is waiting and whether acting is safe, in plain words. */
+  why: string;
+  amount?: number;
+  waitingSince: string;
+  link: string;
+  /** Set when "Take it" should claim a record before opening it. */
+  claim?: { kind: ClaimKind; id: string };
+  /** Set when the person is already handling this. */
+  yours?: boolean;
+}
+
+export type HomeVerb = 'approve' | 'pay' | 'rule' | 'review';
+
+export interface HomeGroup {
+  verb: HomeVerb;
+  /** "Waiting on your approval", "People owed money", "Needs your ruling", "To review". */
+  label: string;
+  /** "11 people · ₦322,670". */
+  summary: string;
+  rows: HomeRow[];
+}
+
+export interface HomeRow {
+  key: string;
+  service: Service;
+  /** People first: "4 riders couldn't withdraw". */
+  title: string;
+  detail: string;
+  amount?: number | null;
+  count: number;
+  oldestAt?: string;
+  /** Older than its promise. */
+  late: boolean;
+  link: string;
+  /** Who else is on items in this row: "Femi on 1". */
+  claimedBy: { name: string; count: number }[];
+  /** False when the person can look but not act (shown as view only). */
+  canAct: boolean;
+}
+
+export interface HomeToday {
+  mine: { people: number; amount: number };
+  team: { people: number; amount: number };
+  /** Newest first: "Chiamaka has her refund". */
+  settled: { text: string; amount?: number; currency?: string; by: string; at: string; link?: string }[];
+  /** The last 7 days, oldest first: people settled vs new people waiting. */
+  week: { day: string; cleared: number; added: number }[];
+}
+
+export interface HomeService {
+  service: Service;
+  /** Money owed to people in this service (refunds and payouts; disputes are not owed yet). */
+  owed: number;
+  people: number;
+  late: boolean;
+}
+
 export interface SearchResult {
   kind: 'person' | 'order' | 'booking' | 'payment' | 'vendor' | 'rider';
   service: Service;

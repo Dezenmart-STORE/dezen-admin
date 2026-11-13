@@ -77,7 +77,7 @@ export function RecordPage({
             )}
           </div>
           {actions && (
-            <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex gap-2 overflow-x-auto border-t border-line bg-sunk/95 px-4 py-3 backdrop-blur md:hidden [&>*]:flex-1">
+            <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex gap-2 overflow-x-auto border-t border-line bg-sunk px-4 py-3 md:hidden [&>*]:flex-1">
               {actions}
             </div>
           )}

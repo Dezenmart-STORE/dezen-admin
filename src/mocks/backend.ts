@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { Approval, AuditEvent, Capability, Claim, ClaimKind, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -81,7 +81,13 @@ const receipt = (
   state: MoneyReceipt['state'],
   next?: MoneyReceipt['next'],
   currency = 'NGN',
-): MoneyReceipt => ({ reference: `DZ-${++refNo}`, amount, currency, recipient, state, at: now(), by: EMAIL, next });
+): MoneyReceipt => {
+  if (state === 'sent' || (state === 'recorded' && !recipient.includes('once an owner'))) {
+    const who = recipient.split(' · ')[0].split(',')[0];
+    db.settled.unshift({ text: state === 'sent' ? `${who} was paid` : `${who} is settled`, amount, currency, by: EMAIL, at: now() });
+  }
+  return { reference: `DZ-${++refNo}`, amount, currency, recipient, state, at: now(), by: EMAIL, next };
+};
 /** The typed amount must match what will move. */
 const checkAmount = (req: Req, expected: number) => {
   if (Number(req.body.amount) !== expected) throw new Fail(422, `The amount must be exactly ${expected.toLocaleString('en-NG')}`);
@@ -189,6 +195,158 @@ performers.set('ap1', () => {
   return receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'sent');
 });
 
+// ── home ─────────────────────────────────────────────────────────────────────
+
+const HOUR = 3_600_000;
+const hoursSince = (iso: string) => (Date.now() - new Date(iso).getTime()) / HOUR;
+const ageWords = (iso: string) => {
+  const h = hoursSince(iso);
+  return h < 1 ? 'under an hour' : h < 48 ? `${Math.floor(h)} hours` : `${Math.floor(h / 24)} days`;
+};
+const naira = (n: number) => `₦${n.toLocaleString('en-NG')}`;
+const s = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** The promise: money within a day, rulings and reviews within two. */
+const PROMISE_H = { pay: 24, approve: 24, rule: 48, review: 48 } as const;
+
+/** Everyone else holding items in a row: "Femi on 1". */
+const claimers = (items: { claim?: Claim | null }[]) => {
+  const out = new Map<string, number>();
+  for (const it of items) if (it.claim && it.claim.by !== EMAIL) out.set(it.claim.name, (out.get(it.claim.name) ?? 0) + 1);
+  return [...out].map(([name, count]) => ({ name, count }));
+};
+
+const home = (): HomeData => {
+  const r = role();
+  const covers = (svc: Service) => r.services.includes('*') || r.services.includes(svc);
+  const can = (cap: Capability, svc: Service) => r.capabilities.includes(cap) && covers(svc);
+  const oldestOf = (dates: string[]) => [...dates].sort()[0];
+  const awaiting = (id: string) => db.approvals.some((a) => a.status === 'pending' && a.target.id === id);
+
+  // The individual things waiting, each with its own age (for "next" and the counts).
+  type Cand = HomeNext & { verb: keyof typeof PROMISE_H; rank: number; claimedByOther: boolean };
+  const cands: Cand[] = [];
+
+  const approvals = db.approvals.filter((a) => a.status === 'pending' && a.requestedBy !== EMAIL && can('move_money', a.service));
+  for (const a of approvals)
+    cands.push({ verb: 'approve', rank: 0, claimedByOther: false, kind: 'Second approval', service: a.service, title: `${a.requestedBy.split('@')[0].replace(/^./, (c) => c.toUpperCase())} needs your second approval for ${naira(a.amount)}`, why: `${a.summary}. They said: “${a.reason}”.`, amount: a.amount, waitingSince: a.requestedAt, link: '/approvals' });
+
+  const stuck = db.withdrawals.filter((w) => (w.status === 'failed' || w.status === 'manual') && !awaiting(w.id));
+  if (covers('express'))
+    for (const w of stuck)
+      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!w.claim && w.claim.by !== EMAIL, yours: w.claim?.by === EMAIL, kind: 'Rider withdrawal', service: 'express', title: `${w.rider.name} has waited ${ageWords(w.requestedAt)} for ${naira(w.amount)}`, why: w.status === 'failed' ? `The bank turned it back: ${w.lastError}. Sending again is safe; the same payment reference is reused.` : 'No checked bank account: send it from the bank, then record it here.', amount: w.amount, waitingSince: w.requestedAt, link: '/express/withdrawals?status=stuck', claim: { kind: 'withdrawal', id: w.id } });
+
+  const refunds = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
+  if (covers('express'))
+    for (const b of refunds)
+      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!b.claim && b.claim.by !== EMAIL, yours: b.claim?.by === EMAIL, kind: 'Refund due', service: 'express', title: `${b.customer.name} has waited ${ageWords(b.createdAt)} for a ${naira(b.fare)} refund`, why: 'They paid for a trip that was cancelled. The full fare goes back to the account they paid from.', amount: b.fare, waitingSince: b.createdAt, link: `/express/bookings/${b.id}`, claim: { kind: 'booking', id: b.id } });
+
+  const failedFood = db.foodOrders.filter((o) => o.payout?.status === 'failed' || o.refund?.status === 'failed');
+  if (covers('food'))
+    for (const o of failedFood) {
+      const refund = o.refund?.status === 'failed';
+      const m = refund ? o.refund! : o.payout!;
+      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, kind: refund ? 'Buyer refund' : 'Vendor payout', service: 'food', title: `${refund ? o.buyer.name : o.vendor.name} has waited ${ageWords(o.createdAt)} for ${naira(m.amount)}`, why: `The bank said: ${m.lastError}. Tried ${m.attempts} times; sending again reuses the same reference.`, amount: m.amount, waitingSince: o.createdAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
+    }
+
+  const foodDisputes = db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved);
+  if (covers('food'))
+    for (const o of foodDisputes)
+      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, kind: 'Dispute', service: 'food', title: `${o.buyer.name} is waiting for a ruling on ${o.orderRef}`, why: `“${o.dispute!.reason}” · ${naira(o.total)} at stake between them and ${o.vendor.name}.`, amount: o.total, waitingSince: o.dispute!.openedAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
+
+  const shopDisputes = db.shopDisputes.filter((d) => !d.ruling);
+  if (covers('shopping'))
+    for (const d of shopDisputes)
+      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!d.claim && d.claim.by !== EMAIL, yours: d.claim?.by === EMAIL, kind: 'Dispute', service: 'shopping', title: `${d.order.buyer.name} and ${d.order.seller.name} are waiting for a ruling`, why: `“${d.reason}” · ${d.order.amount} ${d.order.currency} on ${d.order.orderRef}.`, waitingSince: d.openedAt, link: '/shopping/disputes', claim: { kind: 'shop-dispute', id: d.id } });
+
+  const riders = byStatus(db.riders, 'pending');
+  if (covers('express'))
+    for (const x of riders)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, kind: 'Rider to review', service: 'express', title: `${x.name} can't drive until someone checks their licence`, why: `${x.vehicleType} · plate ${x.plateNumber} · licence ${x.licenceNumber}.`, waitingSince: x.createdAt, link: '/express/riders?status=pending' });
+  const vendors = byStatus(db.vendors, 'pending');
+  if (covers('food'))
+    for (const v of vendors)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, kind: 'Kitchen to review', service: 'food', title: `${v.businessName} is ready to sell`, why: `Check the address (${v.lga}, ${v.state}) and that the payout name matches ${v.ownerName}.`, waitingSince: v.createdAt, link: '/food/vendors?status=pending' });
+
+  const late = (c: Cand) => hoursSince(c.waitingSince) > PROMISE_H[c.verb];
+  const canDo = (c: Cand) => (c.verb === 'review' ? can('verify', c.service) : can('move_money', c.service));
+
+  // Next: what I am already on, else the most urgent thing I can act on that nobody else holds.
+  const mine = cands.find((c) => c.yours);
+  const next =
+    mine ??
+    [...cands]
+      .filter((c) => canDo(c) && !c.claimedByOther)
+      .sort((a, b) => a.rank - b.rank || Number(late(b)) - Number(late(a)) || a.waitingSince.localeCompare(b.waitingSince))[0];
+
+  // Groups, by what the person will do.
+  const row = (key: string, service: Service, title: string, detail: string, items: object[], amount: number | null, dates: string[], verb: keyof typeof PROMISE_H, link: string, canAct: boolean): HomeRow => {
+    const oldestAt = oldestOf(dates);
+    return { key, service, title, detail, amount, count: items.length, oldestAt, late: !!oldestAt && hoursSince(oldestAt) > PROMISE_H[verb], link, claimedBy: claimers(items as { claim?: Claim | null }[]), canAct };
+  };
+  const groups: HomeGroup[] = [];
+
+  // The approval already shown as "next" is not listed again underneath it.
+  const listedApprovals = approvals.filter((a) => !(next && next.link === '/approvals' && next.title.includes(naira(a.amount)) && next.why.startsWith(a.summary)));
+  if (listedApprovals.length)
+    groups.push({ verb: 'approve', label: 'Also waiting on your approval', summary: `${listedApprovals.length} · ${naira(sum(listedApprovals.map((a) => a.amount)))}`, rows: listedApprovals.map((a) => row(a.id, a.service, a.summary, `${a.requestedBy} asked: “${a.reason}”`, [], a.amount, [a.requestedAt], 'approve', '/approvals', true)) });
+
+  const pay: HomeRow[] = [];
+  if (covers('express') && stuck.length) {
+    const hand = stuck.filter((w) => w.status === 'manual').length;
+    pay.push(row('withdrawals', 'express', `${s(stuck.length, "rider couldn't", "riders couldn't")} withdraw`, `${s(stuck.length - hand, 'turned back by the bank', 'turned back by the bank')}${hand ? ` · ${hand} to pay by hand` : ''}`, stuck, sum(stuck.map((w) => w.amount)), stuck.map((w) => w.requestedAt), 'pay', '/express/withdrawals?status=stuck', can('move_money', 'express')));
+  }
+  if (covers('express') && refunds.length)
+    pay.push(row('refunds', 'express', `${s(refunds.length, 'customer', 'customers')} paid for trips that never came`, 'Refund each one their fare', refunds, sum(refunds.map((b) => b.fare)), refunds.map((b) => b.createdAt), 'pay', '/express/bookings?status=to_refund', can('move_money', 'express')));
+  if (covers('food') && failedFood.length) {
+    const names = [...new Set(failedFood.map((o) => (o.refund?.status === 'failed' ? o.buyer.name : o.vendor.name)))];
+    pay.push(row('food-money', 'food', `${s(failedFood.length, 'food payment', 'food payments')} didn't go through`, names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : ''), failedFood, sum(failedFood.map((o) => (o.refund?.status === 'failed' ? o.refund.amount : (o.payout?.amount ?? 0)))), failedFood.map((o) => o.createdAt), 'pay', '/food/orders?status=money_failed', can('move_money', 'food')));
+  }
+  if (pay.length) {
+    const people = sum(pay.map((p) => p.count));
+    groups.push({ verb: 'pay', label: 'People owed money', summary: `${s(people, 'person', 'people')} · ${naira(sum(pay.map((p) => p.amount ?? 0)))}`, rows: pay.sort((a, b) => Number(b.late) - Number(a.late) || (b.amount ?? 0) - (a.amount ?? 0)) });
+  }
+
+  const rule: HomeRow[] = [];
+  if (covers('food') && foodDisputes.length)
+    rule.push(row('food-disputes', 'food', `${s(foodDisputes.length, 'buyer is', 'buyers are')} waiting for a ruling`, 'DezenFoods orders they say went wrong', foodDisputes, sum(foodDisputes.map((o) => o.total)), foodDisputes.map((o) => o.dispute!.openedAt), 'rule', '/food/disputes', can('move_money', 'food')));
+  if (covers('shopping') && shopDisputes.length)
+    rule.push(row('shop-disputes', 'shopping', `${s(shopDisputes.length, 'buyer and seller disagree', 'buyers and sellers disagree')}`, 'Shopping orders · your ruling goes to an owner', shopDisputes, null, shopDisputes.map((d) => d.openedAt), 'rule', '/shopping/disputes', can('move_money', 'shopping')));
+  if (rule.length) groups.push({ verb: 'rule', label: 'Needs a ruling', summary: s(sum(rule.map((x) => x.count)), 'dispute', 'disputes'), rows: rule });
+
+  const review: HomeRow[] = [];
+  if (covers('express') && riders.length) review.push(row('riders', 'express', `${s(riders.length, "rider can't", "riders can't")} earn until someone checks them`, 'Licence and plate number', riders, null, riders.map((x) => x.createdAt), 'review', '/express/riders?status=pending', can('verify', 'express')));
+  if (covers('food') && vendors.length) review.push(row('vendors', 'food', `${s(vendors.length, 'kitchen is', 'kitchens are')} ready to sell`, 'Address and payout name', vendors, null, vendors.map((v) => v.createdAt), 'review', '/food/vendors?status=pending', can('verify', 'food')));
+  const providers = byStatus(db.providers, 'pending');
+  if (covers('express') && providers.length) review.push(row('providers', 'express', `${s(providers.length, 'delivery company wants', 'delivery companies want')} to deliver`, 'Coverage and contacts', providers, null, providers.map((p) => p.createdAt), 'review', '/express/providers?status=pending', can('verify', 'express')));
+  const reported = db.products.filter((p) => p.reports > 0 && p.visible);
+  if (covers('shopping') && reported.length) review.push(row('products', 'shopping', `${s(reported.length, 'product was', 'products were')} reported by buyers`, 'Hide or keep them', reported, null, reported.map((p) => p.createdAt), 'review', '/shopping/products?status=reported', can('verify', 'shopping')));
+  if (review.length) groups.push({ verb: 'review', label: 'To review', summary: `${sum(review.map((x) => x.count))} waiting`, rows: review });
+
+  // Today.
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const today = db.settled.filter((x) => new Date(x.at) >= todayStart);
+  const tally = (xs: typeof today) => ({ people: xs.length, amount: sum(xs.map((x) => x.amount ?? 0)) });
+  const week = db.week.map((d, i) => (i === db.week.length - 1 ? { ...d, cleared: today.length } : d));
+
+  // The living mark: what each service owes people, and whether any of it is late.
+  const services = (['shopping', 'express', 'food', 'platform'] as Service[]).filter(covers).map((svc) => {
+    const mineSvc = cands.filter((c) => c.service === svc);
+    const owed = sum(mineSvc.filter((c) => c.verb === 'pay' || c.verb === 'approve').map((c) => c.amount ?? 0));
+    return { service: svc, owed, people: mineSvc.length, late: mineSvc.some(late) };
+  });
+
+  return {
+    latePeople: cands.filter(late).length,
+    waitingPeople: cands.length,
+    oldestAt: oldestOf(cands.map((c) => c.waitingSince)),
+    next: next ? (({ verb: _v, rank: _r, claimedByOther: _c, ...n }) => n)(next) : null,
+    groups,
+    today: { mine: tally(today.filter((x) => x.by === EMAIL)), team: tally(today), settled: today.slice(0, 6), week },
+    services,
+  };
+};
+
 // ── routes ───────────────────────────────────────────────────────────────────
 
 const routes: Route[] = [
@@ -282,6 +440,7 @@ const routes: Route[] = [
   },
 
   // home
+  { method: 'GET', path: /^\/admin\/home$/, handle: () => ok(home()) },
   { method: 'GET', path: /^\/admin\/queues$/, handle: () => ok(queues()) },
   { method: 'GET', path: /^\/admin\/search$/, handle: (req) => ok(search(req.params.q ?? '')) },
 
@@ -302,6 +461,7 @@ const routes: Route[] = [
       const status = req.body.status as typeof v.status;
       if (status !== 'approved') v.rejectionReason = needReason(req);
       v.status = status;
+      if (status === 'approved') db.settled.unshift({ text: `${v.businessName} can sell now`, by: EMAIL, at: now() });
       return ok(v);
     },
   },
@@ -408,6 +568,7 @@ const routes: Route[] = [
       const r = find(db.riders, req.match[1], 'Rider');
       if (req.body.status === 'rejected') needReason(req);
       r.status = req.body.status as typeof r.status;
+      if (r.status === 'verified') db.settled.unshift({ text: `${r.name} can drive now`, by: EMAIL, at: now() });
       return ok(r);
     },
   },

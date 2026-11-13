@@ -1,5 +1,6 @@
 import type {
   Approval,
+  HomeToday,
   AuditEvent,
   Booking,
   DeliveryProvider,
@@ -443,6 +444,29 @@ export const approvals: Approval[] = [
     target: { kind: 'withdrawal', id: 'w0101' },
     status: 'pending',
   },
+];
+
+// ── settled today ────────────────────────────────────────────────────────────
+
+/** People settled today, newest first. Money actions in the sample backend add to it. */
+export const settled: HomeToday['settled'] = [
+  { text: `${people[4].name.split(' ')[0]} has her refund`, amount: 3450, by: 'finance@dezenmart.com', at: ago(0.6) },
+  { text: 'Mama Put Kitchen was paid for 6 orders', amount: 42300, by: 'finance@dezenmart.com', at: ago(1.3) },
+  { text: `${riders[7].name} can withdraw again`, amount: 18400, by: 'you@dezenmart.com', at: ago(2.1) },
+  { text: 'Chop Life Grill can sell now', by: 'foods.ops@dezenmart.com', at: ago(2.8) },
+  { text: `${people[9].name.split(' ')[0]} got a trip refund`, amount: 2900, by: 'finance@dezenmart.com', at: ago(3.4) },
+  { text: `${riders[9].name} can drive now`, by: 'foods.ops@dezenmart.com', at: ago(4.2) },
+  { text: 'Suya Spot was paid for 3 orders', amount: 15600, by: 'you@dezenmart.com', at: ago(5.1) },
+];
+/** The last 7 days, oldest first (today is filled in live). */
+export const week = [
+  { day: 'Fri', cleared: 21, added: 18 },
+  { day: 'Sat', cleared: 14, added: 19 },
+  { day: 'Sun', cleared: 9, added: 12 },
+  { day: 'Mon', cleared: 26, added: 22 },
+  { day: 'Tue', cleared: 19, added: 24 },
+  { day: 'Wed', cleared: 23, added: 20 },
+  { day: 'Today', cleared: 0, added: 9 },
 ];
 
 // ── staff and activity ───────────────────────────────────────────────────────

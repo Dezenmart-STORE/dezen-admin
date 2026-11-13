@@ -33,7 +33,7 @@ Production builds must set `VITE_USE_SAMPLE_DATA=false`.
 
 | Area | Pages |
 | --- | --- |
-| Home | What is waiting, money first; search across everything |
+| Home | Your shift: the one person to help next ("Take it"), the rest grouped by approve, pay, rule and review, the living mark (each shape grows with what its service owes; a red halo means someone is past our promise), and who was settled today |
 | DezenFoods | Orders (with full history), disputes, vendors |
 | DezenExpress | Trips (with refunds), rider withdrawals, riders (with wallet corrections), delivery companies |
 | Shopping | Orders, disputes (rulings wait for an owner), products (hide, show, sponsor), sellers |

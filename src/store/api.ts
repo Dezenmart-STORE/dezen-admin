@@ -10,6 +10,7 @@ import { sampleBaseQuery } from '../mocks/backend';
 import { signedOut } from './session';
 import type {
   Approval,
+  HomeData,
   AuditEvent,
   Claim,
   ClaimKind,
@@ -123,12 +124,12 @@ export const api = createApi({
     // ── claims: who is handling what ──
     claim: b.mutation<Claim, { kind: ClaimKind; id: string; takeOver?: boolean }>({
       query: (body) => ({ url: '/admin/claims', method: 'POST', body }),
-      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Audit'],
+      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Queues', 'Audit'],
       transformResponse: unwrap,
     }),
     release: b.mutation<unknown, { kind: ClaimKind; id: string }>({
       query: ({ kind, id }) => ({ url: `/admin/claims/${kind}/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Audit'],
+      invalidatesTags: ['FoodOrders', 'Bookings', 'Withdrawals', 'ShopDisputes', 'Queues', 'Audit'],
     }),
 
     // ── second approver ──
@@ -148,6 +149,7 @@ export const api = createApi({
     }),
 
     // ── home ──
+    home: b.query<HomeData, void>({ query: () => '/admin/home', providesTags: ['Queues'], transformResponse: unwrap }),
     queues: b.query<QueueItem[], void>({ query: () => '/admin/queues', providesTags: ['Queues'], transformResponse: unwrap }),
     search: b.query<SearchResult[], string>({
       query: (q) => ({ url: '/admin/search', params: { q } }),
@@ -392,6 +394,7 @@ export const {
   useMeQuery,
   useSignOutMutation,
   useQueuesQuery,
+  useHomeQuery,
   useClaimMutation,
   useReleaseMutation,
   useApprovalsQuery,

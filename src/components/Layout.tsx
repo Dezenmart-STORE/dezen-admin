@@ -173,7 +173,7 @@ export function Layout() {
       ))}
       <div className="mt-auto space-y-3 border-t border-line px-3 pt-4">
         {USE_SAMPLE_DATA && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-waiting/40 px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-waiting">
+          <span className="block font-mono text-[10.5px] uppercase tracking-[0.08em] text-waiting">
             Sample data
           </span>
         )}
@@ -231,12 +231,12 @@ export function Layout() {
 
       <div className="min-w-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
         {/* Phone top bar */}
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-ground/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur md:hidden">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-ground px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:hidden">
           <Wordmark compact />
           {USE_SAMPLE_DATA && <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-waiting">Sample</span>}
         </div>
         {/* Desktop search */}
-        <div className="sticky top-0 z-30 hidden border-b border-line bg-ground/95 px-8 py-3 backdrop-blur md:block">
+        <div className="sticky top-0 z-30 hidden border-b border-line bg-ground px-8 py-3 md:block">
           <div className="max-w-xl">
             <TopSearch />
           </div>
@@ -253,7 +253,7 @@ export function Layout() {
       </div>
 
       {/* Phone tabs */}
-      <nav aria-label="Quick" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-line bg-sunk/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      <nav aria-label="Quick" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-line bg-sunk pb-[env(safe-area-inset-bottom)] md:hidden">
         {tab('/', 'Home', <FiHome className="h-5 w-5" />, true)}
         {tab('/search', 'Search', <FiSearch className="h-5 w-5" />)}
         <button type="button" onClick={() => setMenuOpen(true)} className="flex cursor-pointer flex-col items-center gap-1 py-2.5 text-[11px] font-medium text-ink-3">

@@ -170,3 +170,77 @@ export function Settle({ size = 44 }: { size?: number }) {
     />
   );
 }
+
+/**
+ * The living mark: the Dezenmart mark drawn from the day's work.
+ *  - Each shape is a service, in its place on the mark.
+ *  - Its size grows with the money that service owes people (square-root scale, never below 42%,
+ *    so a quiet service never vanishes).
+ *  - Solid while busy, so it always reads as the mark; a halo around it once anyone is past their promise;
+ *    a faint outline when clear.
+ *  - The centre counts the people waiting past their promise.
+ * Every state is also written out beside it, so nothing depends on reading sizes.
+ */
+export function LivingMark({
+  services,
+  latePeople,
+  size = 240,
+}: {
+  services: { service: Service; owed: number; people: number; late: boolean }[];
+  latePeople: number;
+  size?: number;
+}) {
+  const by = Object.fromEntries(services.map((s) => [SERVICE_SLOT[s.service], s]));
+  const max = Math.max(1, ...services.map((s) => s.owed));
+  const half = size / 2;
+  const gap = size * 0.03;
+  const slots: Slot[] = ['tl', 'tr', 'bl', 'br'];
+  // Each shape is anchored at its corner nearest the centre, so the mark keeps its form as sizes change.
+  const anchor: Record<Slot, CSSProperties> = {
+    tl: { right: half + gap / 2, bottom: half + gap / 2 },
+    tr: { left: half + gap / 2, bottom: half + gap / 2 },
+    bl: { right: half + gap / 2, top: half + gap / 2 },
+    br: { left: half + gap / 2, top: half + gap / 2 },
+  };
+  const label = services
+    .map((s) => `${SERVICE_NAME[s.service]}: ${s.people ? `${s.people} waiting${s.owed ? `, ₦${s.owed.toLocaleString('en-NG')} owed` : ''}${s.late ? ', some late' : ''}` : 'clear'}`)
+    .join('. ');
+  return (
+    <div role="img" aria-label={`${latePeople} people waiting past their promise. ${label}.`} className="relative shrink-0" style={{ width: size, height: size }}>
+      {slots.map((slot) => {
+        const s = by[slot];
+        const clear = !s || s.people === 0;
+        const scale = clear ? 0.52 : s.owed > 0 ? Math.max(0.62, Math.sqrt(s.owed / max)) : 0.66;
+        // The two small shapes of the mark are a little smaller at full scale, as in the logo.
+        const full = (SMALL[slot] ? 0.82 : 1) * (half - gap);
+        const d = full * scale;
+        const colour = COLOUR[slot];
+        const late = !clear && s.late;
+        return (
+          <span
+            key={slot}
+            aria-hidden
+            className="absolute block"
+            style={{
+              ...anchor[slot],
+              width: d,
+              height: d,
+              borderRadius: RADIUS[slot],
+              background: clear ? 'transparent' : colour,
+              boxShadow: clear ? 'inset 0 0 0 1.5px var(--line)' : late ? `0 0 0 ${Math.max(3, size * 0.016)}px var(--ground), 0 0 0 ${Math.max(5, size * 0.026)}px var(--need)` : undefined,
+              transition: 'width 600ms var(--ease-settle), height 600ms var(--ease-settle), box-shadow 400ms var(--ease-settle), background-color 400ms var(--ease-settle)',
+            }}
+          />
+        );
+      })}
+      <span
+        className="absolute grid place-items-center rounded-full bg-ground text-center"
+        style={{ left: half, top: half, width: size * 0.19, height: size * 0.19, transform: 'translate(-50%, -50%)', boxShadow: '0 0 0 3px var(--ground), 0 0 0 4px var(--line)' }}
+      >
+        <span className={`font-mono font-semibold leading-none ${latePeople ? 'text-need' : 'text-settled'}`} style={{ fontSize: size * 0.085 }}>
+          {latePeople}
+        </span>
+      </span>
+    </div>
+  );
+}
