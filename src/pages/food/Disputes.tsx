@@ -3,7 +3,9 @@ import { formatDate } from '../../lib/format';
 import { useListParams } from '../../lib/useListParams';
 import { useFoodDisputesQuery } from '../../store/api';
 import { Table } from '../../components/Table';
-import { Money, PageHeader, Pagination, Status } from '../../components/ui';
+import { Money, Pagination } from '../../components/ui';
+import { ClaimTag } from '../../components/ClaimBar';
+import { QueueTop, Waited } from '../../components/NextCard';
 
 /** Open food disputes, oldest first. Each opens as a case file with the ruling at the end. */
 export function FoodDisputes() {
@@ -11,7 +13,16 @@ export function FoodDisputes() {
   const { data, isLoading, isFetching, error } = useFoodDisputesQuery(list.args);
   return (
     <>
-      <PageHeader service="food" eyebrow="DezenFoods" title="Disputes" description="Buyers waiting for a ruling. Open one to read both sides before deciding." />
+      <QueueTop
+        queue="food-disputes"
+        service="food"
+        eyebrow="DezenFoods"
+        title="Disputes"
+        who={['buyer', 'buyers']}
+        waitFor="for a ruling"
+        description="Open one to read both sides before deciding. The oldest is at the top."
+        clear={['Every food dispute has a ruling.', 'Nobody is waiting to hear back from us.']}
+      />
       <Table
         rows={data?.items}
         loading={isLoading}
@@ -22,18 +33,26 @@ export function FoodDisputes() {
         empty="Every food dispute has a ruling."
         settledWhenEmpty
         mobile={(o) => ({
-          title: <span className="font-mono">{o.orderRef}</span>,
+          title: o.buyer.name,
           subtitle: `“${o.dispute?.reason}”`,
           amount: <Money amount={o.total} />,
-          status: <Status status="disputed" word="Needs a ruling" />,
+          status: <Waited since={o.dispute?.openedAt} promiseHours={48} />,
         })}
         columns={[
-          { header: 'Order', cell: (o) => <span className="font-mono">{o.orderRef}</span> },
-          { header: 'What the buyer said', cell: (o) => <span className="block max-w-[38ch]">“{o.dispute?.reason}”</span> },
+          {
+            header: 'Buyer',
+            cell: (o) => (
+              <>
+                <span className="block">{o.buyer.name}</span>
+                <span className="font-mono text-[12px] font-normal text-ink-3">{o.orderRef} · {formatDate(o.dispute?.openedAt)}</span>
+              </>
+            ),
+          },
+          { header: 'What they said', cell: (o) => <span className="block max-w-[38ch]">“{o.dispute?.reason}”</span> },
           { header: 'Vendor', cell: (o) => o.vendor.name },
-          { header: 'Buyer', cell: (o) => o.buyer.name },
           { header: 'At stake', align: 'right', cell: (o) => <Money amount={o.total} /> },
-          { header: 'Opened', cell: (o) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(o.dispute?.openedAt)}</span> },
+          { header: 'Waiting', align: 'right', cell: (o) => <Waited since={o.dispute?.openedAt} promiseHours={48} /> },
+          { header: 'Who has it', cell: (o) => <ClaimTag claim={o.claim} /> },
         ]}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}

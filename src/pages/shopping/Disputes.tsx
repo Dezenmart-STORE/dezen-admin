@@ -10,7 +10,8 @@ import { Dialog, MoneySheet } from '../../components/Dialog';
 import { Choice, WHO } from '../../components/Choice';
 import { ClaimTag } from '../../components/ClaimBar';
 import { useAppSelector } from '../../store';
-import { Button, InfoNote, Money, PageHeader, Pagination, Status } from '../../components/ui';
+import { Button, Money, Pagination, Status } from '../../components/ui';
+import { QueueTop, Waited } from '../../components/NextCard';
 
 type Resolution = 'refund_buyer' | 'release_to_seller';
 
@@ -45,10 +46,16 @@ export function ShopDisputes() {
 
   return (
     <>
-      <PageHeader service="shopping" eyebrow="Shopping" title="Disputes" description="Orders a buyer or seller has disputed." />
-      <div className="mb-5">
-        <InfoNote>Your ruling is recorded straight away. An owner then carries it out, and the buyer and seller are told when it is done.</InfoNote>
-      </div>
+      <QueueTop
+        queue="shop-disputes"
+        service="shopping"
+        eyebrow="Shopping"
+        title="Disputes"
+        who={['buyer', 'buyers']}
+        waitFor="for a ruling"
+        description="You decide who gets the money. An owner then pays it out, and the buyer and seller are told when it is done."
+        clear={['No Shopping disputes are open.', 'Every buyer and seller has a ruling.']}
+      />
       <Table
         rows={data?.items}
         loading={isLoading}
@@ -58,13 +65,21 @@ export function ShopDisputes() {
         empty="No Shopping disputes are open."
         settledWhenEmpty
         mobile={(d) => ({
-          title: <span className="font-mono">{d.order.orderRef}</span>,
+          title: d.order.buyer.name,
           subtitle: `“${d.reason}”`,
-          amount: <Money amount={d.order.amount} currency={d.order.currency} />,
+          amount: <Money amount={d.order.amount} currency={d.order.currency} ngn={d.order.amountNgn} />,
           status: state(d),
         })}
         columns={[
-          { header: 'Order', cell: (d) => <span className="font-mono">{d.order.orderRef}</span> },
+          {
+            header: 'Buyer',
+            cell: (d) => (
+              <>
+                <span className="block font-semibold">{d.order.buyer.name}</span>
+                <span className="font-mono text-[12px] text-ink-3">{d.order.orderRef}</span>
+              </>
+            ),
+          },
           {
             header: 'What happened',
             cell: (d) => (
@@ -76,9 +91,9 @@ export function ShopDisputes() {
               </>
             ),
           },
-          { header: 'Buyer', cell: (d) => d.order.buyer.name },
           { header: 'Seller', cell: (d) => d.order.seller.name },
-          { header: 'At stake', align: 'right', cell: (d) => <Money amount={d.order.amount} currency={d.order.currency} /> },
+          { header: 'At stake', align: 'right', cell: (d) => <Money amount={d.order.amount} currency={d.order.currency} ngn={d.order.amountNgn} /> },
+          { header: 'Waiting', align: 'right', cell: (d) => (d.ruling ? <span className="text-ink-3">—</span> : <Waited since={d.openedAt} promiseHours={48} />) },
           { header: 'Ruling', cell: state },
         ]}
       />
@@ -99,6 +114,7 @@ export function ShopDisputes() {
                 title="Refund the buyer"
                 amount={choosing.order.amount}
                 currency={choosing.order.currency}
+                ngn={choosing.order.amountNgn}
                 consequence={`${choosing.order.buyer.name} gets the payment back. ${choosing.order.seller.name} is not paid.`}
                 onChoose={() => {
                   setRuling({ d: choosing, resolution: 'refund_buyer' });
@@ -109,6 +125,7 @@ export function ShopDisputes() {
                 title="Release payment to the seller"
                 amount={choosing.order.amount}
                 currency={choosing.order.currency}
+                ngn={choosing.order.amountNgn}
                 consequence={`${choosing.order.seller.name} is paid. ${choosing.order.buyer.name} gets nothing back.`}
                 onChoose={() => {
                   setRuling({ d: choosing, resolution: 'release_to_seller' });
@@ -126,6 +143,7 @@ export function ShopDisputes() {
           title={ruling.resolution === 'refund_buyer' ? 'Rule: refund the buyer' : 'Rule: pay the seller'}
           amount={ruling.d.order.amount}
           currency={ruling.d.order.currency}
+          ngn={ruling.d.order.amountNgn}
           recipient={
             ruling.resolution === 'refund_buyer'
               ? { name: ruling.d.order.buyer.name, detail: 'The buyer' }
@@ -133,7 +151,7 @@ export function ShopDisputes() {
           }
           consequence="Your ruling is recorded now and an owner carries it out. Once carried out, it cannot be reversed."
           danger
-          actionLabel={`Rule: ${ruling.resolution === 'refund_buyer' ? 'refund' : 'pay'} ${ruling.d.order.amount.toLocaleString('en-NG')} ${ruling.d.order.currency} to ${(ruling.resolution === 'refund_buyer' ? ruling.d.order.buyer.name : ruling.d.order.seller.name).split(' ')[0]}`}
+          actionLabel={`Rule: ${ruling.resolution === 'refund_buyer' ? 'refund' : 'pay'} ₦${ruling.d.order.amountNgn.toLocaleString('en-NG')} to ${(ruling.resolution === 'refund_buyer' ? ruling.d.order.buyer.name : ruling.d.order.seller.name).split(' ')[0]}`}
           onClose={() => setRuling(null)}
           onConfirm={async ({ code, reason }) => receiptOf(await rule({ id: ruling.d.id, resolution: ruling.resolution, amount: ruling.d.order.amount, code, reason }))}
         />

@@ -9,10 +9,11 @@ import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
 import { ConfirmDialog } from '../../components/Dialog';
 import { Button, Money, PageHeader, Pagination, Status, Tag } from '../../components/ui';
+import { QueueTop } from '../../components/NextCard';
 
 export function Products() {
   const can = useCan();
-  const list = useListParams();
+  const list = useListParams({ status: 'reported' });
   const { data, isLoading, isFetching, error } = useProductsQuery(list.args);
   const [setVisible] = useSetProductVisibilityMutation();
   const [setSponsored, sponsoring] = useSetProductSponsoredMutation();
@@ -22,7 +23,6 @@ export function Products() {
   const shown = (p: Product) => (
     <span className="flex flex-wrap items-center gap-2">
       {p.visible ? <Status status="approved" word="Visible" /> : <Status status="cancelled" word="Hidden" />}
-      {p.reports > 0 && <Tag tone="need">{p.reports} reports</Tag>}
       {p.sponsored && <Tag>Sponsored</Tag>}
     </span>
   );
@@ -46,14 +46,27 @@ export function Products() {
 
   return (
     <>
-      <PageHeader service="shopping" eyebrow="Shopping" title="Products" description="What sellers list on the marketplace." />
+      {list.status === 'reported' ? (
+        <QueueTop
+          queue="products"
+          service="shopping"
+          eyebrow="Shopping"
+          title="Products"
+          who={['product', 'products']}
+          waitFor="for a look"
+          description="Read what buyers said, then hide the product or keep it. Hiding tells the seller why."
+          clear={['No products have been reported.', 'Nothing buyers flagged is still for sale.']}
+        />
+      ) : (
+        <PageHeader service="shopping" eyebrow="Shopping" title="Products" description="What sellers list on the marketplace." />
+      )}
       <ListToolbar
         q={list.q}
         status={list.status}
         placeholder="Product or seller"
         statuses={[
-          { value: '', label: 'All' },
           { value: 'reported', label: 'Reported' },
+          { value: '', label: 'All' },
           { value: 'hidden', label: 'Hidden' },
         ]}
         onChange={list.set}
@@ -66,7 +79,7 @@ export function Products() {
         rowKey={(p) => p.id}
         empty={list.status === 'reported' ? 'No products have been reported.' : 'No products match.'}
         settledWhenEmpty={list.status === 'reported'}
-        mobile={(p) => ({ title: p.name, subtitle: `${p.seller.name} · ${p.category}`, amount: <Money amount={p.price} currency={p.currency} />, status: shown(p) })}
+        mobile={(p) => ({ title: p.name, subtitle: `${p.seller.name} · ${p.category}`, amount: <Money amount={p.price} currency={p.currency} ngn={p.priceNgn} />, status: shown(p) })}
         columns={[
           {
             header: 'Product',
@@ -76,10 +89,23 @@ export function Products() {
                 <p className="text-[12.5px] text-ink-3">
                   {p.category} · {p.seller.name}
                 </p>
+                {p.reports > 0 && (
+                  <div className="mt-2 max-w-[48ch] space-y-1 border-l-2 border-need/50 pl-3">
+                    <p className="text-[12px] font-semibold text-need">
+                      {p.reports} {p.reports === 1 ? 'buyer reported this' : 'buyers reported this'}
+                    </p>
+                    {p.reportNotes?.slice(0, 2).map((n) => (
+                      <p key={n.at} className="text-[13px] text-ink-2">
+                        “{n.text}”
+                      </p>
+                    ))}
+                    {(p.reportNotes?.length ?? 0) > 2 && <p className="text-[12px] text-ink-3">and {p.reportNotes!.length - 2} more</p>}
+                  </div>
+                )}
               </>
             ),
           },
-          { header: 'Price', align: 'right', cell: (p) => <Money amount={p.price} currency={p.currency} /> },
+          { header: 'Price', align: 'right', cell: (p) => <Money amount={p.price} currency={p.currency} ngn={p.priceNgn} /> },
           { header: 'In stock', align: 'right', cell: (p) => <span className="font-mono">{p.stock}</span> },
           { header: 'Shown', cell: shown },
           { header: 'Listed', cell: (p) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(p.createdAt)}</span> },
@@ -119,7 +145,7 @@ export function Sellers() {
         mobile={(s) => ({
           title: s.name,
           subtitle: `${s.products} products · ${s.ordersCompleted} orders`,
-          status: s.disputes ? <Tag tone="need">{s.disputes} disputes</Tag> : undefined,
+          status: s.disputes ? <span className="text-[12.5px] text-ink-2">{s.disputes} {s.disputes === 1 ? "dispute" : "disputes"}</span> : undefined,
         })}
         columns={[
           {
@@ -133,7 +159,7 @@ export function Sellers() {
           },
           { header: 'Products', align: 'right', cell: (s) => <span className="font-mono">{s.products}</span> },
           { header: 'Orders completed', align: 'right', cell: (s) => <span className="font-mono">{s.ordersCompleted}</span> },
-          { header: 'Disputes', align: 'right', cell: (s) => (s.disputes ? <Tag tone="need">{s.disputes}</Tag> : <span className="font-mono text-ink-3">0</span>) },
+          { header: 'Disputes', align: 'right', cell: (s) => <span className={`font-mono ${s.disputes ? "font-semibold" : "text-ink-3"}`}>{s.disputes}</span> },
           { header: 'Joined', cell: (s) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(s.joinedAt)}</span> },
         ]}
       />

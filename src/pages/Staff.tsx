@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { errorMessage, failureOf } from '../lib/errors';
-import { formatDate, humanize } from '../lib/format';
+import { formatDate } from '../lib/format';
 import { useAppSelector } from '../store';
 import { useGrantStaffMutation, useStaffActionMutation, useStaffQuery } from '../store/api';
 import type { StaffMember } from '../store/types';
 import { Table } from '../components/Table';
 import { ConfirmWithCode } from '../components/Dialog';
-import { Badge, Button, Card, Field, Input, PageHeader, Select, Status } from '../components/ui';
+import { Button, Card, Field, Input, PageHeader, Select, Status } from '../components/ui';
 
 export const SERVICE_LABELS: Record<string, string> = {
   '*': 'All services',
@@ -114,13 +114,7 @@ export function Staff() {
           },
           {
             header: 'Can',
-            cell: (s) => (
-              <div className="flex max-w-72 flex-wrap gap-1">
-                {s.capabilities.map((c) => (
-                  <Badge key={c}>{CAPABILITY_LABELS[c] ?? humanize(c)}</Badge>
-                ))}
-              </div>
-            ),
+            cell: (s) => <span className="block max-w-[34ch] text-[13.5px] text-ink-2">{canWords(s.capabilities)}</span>,
           },
           { header: 'Where', cell: (s) => <span className="text-sm">{s.services.map((x) => SERVICE_LABELS[x] ?? x).join(', ')}</span> },
           {
@@ -132,22 +126,25 @@ export function Staff() {
             header: '',
             cell: (s) =>
               s.email === me ? (
-                <span className="text-xs text-muted">You</span>
-              ) : (
-                <div className="flex flex-wrap justify-end gap-2">
-                  {s.disabled ? (
-                    <Button onClick={() => setActing({ member: s, action: 'enable' })}>Restore access</Button>
-                  ) : (
-                    <Button variant="danger" onClick={() => setActing({ member: s, action: 'disable' })}>
-                      Remove access
-                    </Button>
-                  )}
-                  {s.authenticatorSet && !s.disabled && (
-                    <Button variant="quiet" onClick={() => setActing({ member: s, action: 'reset-authenticator' })}>
-                      Reset authenticator
-                    </Button>
-                  )}
+                <span className="text-xs text-ink-3">You</span>
+              ) : s.capabilities.includes('staff_admin') && !s.disabled ? (
+                <span className="text-[12px] text-ink-3" title="An owner cannot be removed here. Another owner changes it with the founder's approval.">
+                  Owner · protected
+                </span>
+              ) : s.disabled ? (
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => setActing({ member: s, action: 'enable' })}>
+                    Restore access
+                  </Button>
                 </div>
+              ) : (
+                <ManageMenu
+                  name={s.name}
+                  items={[
+                    ...(s.authenticatorSet ? [{ label: 'Reset authenticator', onSelect: () => setActing({ member: s, action: 'reset-authenticator' }) }] : []),
+                    { label: 'Remove access', danger: true, onSelect: () => setActing({ member: s, action: 'disable' }) },
+                  ]}
+                />
               ),
           },
         ]}
@@ -180,5 +177,48 @@ export function Staff() {
         onConfirm={async ({ code }) => failureOf(await act({ id: acting!.member.id, action: acting!.action, code }))}
       />
     </>
+  );
+}
+
+/** What someone can do, said as one plain sentence rather than a row of tags. */
+function canWords(caps: string[]) {
+  const parts = ['Reads records'];
+  if (caps.includes('verify')) parts.push('approves newcomers and products');
+  if (caps.includes('move_money')) parts.push('sends refunds and payouts');
+  if (caps.includes('read_pii')) parts.push('sees full personal details');
+  if (caps.includes('staff_admin')) return 'Everything, including staff and settings';
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Rare, serious actions live behind a menu instead of a red button on every row,
+ * so a stray click never starts removing someone.
+ */
+function ManageMenu({ name, items }: { name: string; items: { label: string; danger?: boolean; onSelect: () => void }[] }) {
+  return (
+    <details className="relative ml-auto w-fit [&[open]>summary]:bg-raised">
+      <summary
+        aria-label={`Manage ${name}`}
+        className="flex h-9 cursor-pointer list-none items-center rounded-leaf-sm border border-line px-3 text-[13px] font-medium text-ink-2 hover:text-ink md:h-8"
+      >
+        Manage
+      </summary>
+      <div role="menu" className="absolute right-0 z-20 mt-1 min-w-[12rem] rounded-leaf-sm border border-line bg-surface p-1 shadow-lg">
+        {items.map((it) => (
+          <button
+            key={it.label}
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              (e.currentTarget.closest('details') as HTMLDetailsElement).open = false;
+              it.onSelect();
+            }}
+            className={`block w-full cursor-pointer rounded-[8px] px-3 py-2 text-left text-[13.5px] hover:bg-raised ${it.danger ? 'text-need' : ''}`}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
+    </details>
   );
 }

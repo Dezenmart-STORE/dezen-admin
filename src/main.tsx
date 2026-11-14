@@ -1,4 +1,5 @@
 import { StrictMode, type ReactNode } from 'react';
+import { ReviewCasePage } from './components/ReviewCasePage';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
@@ -73,11 +74,14 @@ createRoot(document.getElementById('root')!).render(
             {page('food/orders/:id', ['support', 'food'], <FoodOrderDetail />)}
             {page('food/disputes', ['support', 'food'], <FoodDisputes />)}
             {page('food/vendors', ['support', 'food'], <Vendors />)}
+            {page('food/vendors/:id', ['support', 'food'], <ReviewCasePage kind="vendor" />)}
             {page('express/bookings', ['support', 'express'], <Bookings />)}
             {page('express/bookings/:id', ['support', 'express'], <BookingDetail />)}
             {page('express/withdrawals', ['support', 'express'], <Withdrawals />)}
             {page('express/riders', ['support', 'express'], <Riders />)}
+            {page('express/riders/:id', ['support', 'express'], <ReviewCasePage kind="rider" />)}
             {page('express/providers', ['support', 'express'], <Providers />)}
+            {page('express/providers/:id', ['support', 'express'], <ReviewCasePage kind="provider" />)}
             {page('shopping/orders', ['support', 'shopping'], <ShopOrders />)}
             {page('shopping/orders/:id', ['support', 'shopping'], <ShopOrderDetail />)}
             {page('shopping/disputes', ['support', 'shopping'], <ShopDisputes />)}

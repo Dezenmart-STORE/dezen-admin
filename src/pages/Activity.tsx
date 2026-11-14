@@ -24,7 +24,7 @@ export function Activity() {
       <ListToolbar
         q={list.q}
         status={list.status}
-        placeholder="Search by staff email or what happened"
+        placeholder="Search by name, email or what happened"
         statuses={[
           { value: '', label: 'All services' },
           { value: 'food', label: SERVICE_LABELS.food },
@@ -42,7 +42,15 @@ export function Activity() {
         empty="Nothing recorded yet."
         columns={[
           { header: 'When', cell: (e) => <span className="whitespace-nowrap text-xs text-muted">{formatDate(e.at)}</span> },
-          { header: 'Who', cell: (e) => e.staffEmail },
+          {
+            header: 'Who',
+            cell: (e) => (
+              <>
+                <span className="block font-medium">{e.staffName ?? e.staffEmail}</span>
+                <span className="text-[12px] text-ink-3">{e.staffEmail}</span>
+              </>
+            ),
+          },
           { header: 'What', cell: (e) => <span className="text-sm">{e.summary}</span> },
           { header: 'Reason', cell: (e) => <span className="text-sm text-muted">{e.reason ?? '—'}</span> },
           { header: 'Outcome', cell: outcome },

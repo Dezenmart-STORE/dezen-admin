@@ -6,13 +6,14 @@ import { formatDate } from '../lib/format';
 import { useListParams } from '../lib/useListParams';
 import { useAppSelector, useCan } from '../store';
 import { usePeopleQuery, usePersonQuery, useRevealPersonMutation } from '../store/api';
-import type { PersonPrivate } from '../store/types';
+import type { PersonDetail as PersonRecord, PersonPrivate } from '../store/types';
 import { Table } from '../components/Table';
 import { ListToolbar } from '../components/ListToolbar';
 import { RecordPage } from '../components/RecordPage';
 import { CodeSheet } from '../components/Dialog';
 import { WHO } from '../components/Choice';
-import { ServiceGlyph } from '../components/brand';
+import { ServiceGlyph, StatusShape } from '../components/brand';
+import { ageWords } from '../components/NextCard';
 import { Button, Card, KeyValues, Locked, Money, PageHeader, Pagination, SectionTitle, Status, Tag } from '../components/ui';
 
 const roles = (p: { isSeller: boolean; isVendor: boolean; isRider: boolean }) => (
@@ -134,6 +135,7 @@ export function PersonDetail() {
     >
       {p && (
         <>
+          <Standing p={p} />
           <section>
             <SectionTitle>Orders and trips</SectionTitle>
             <Card>
@@ -198,5 +200,71 @@ export function PersonDetail() {
         </>
       )}
     </RecordPage>
+  );
+}
+
+/** Where they stand with us, first: what we owe them, what is still open, and how often they dispute. */
+function Standing({ p }: { p: PersonRecord }) {
+  const { owedToThem, openCases, disputes90d, orders } = p.standing;
+  const owed = owedToThem.reduce((n, x) => n + x.amount, 0);
+  const first = p.name.split(' ')[0];
+  return (
+    <section aria-label="Where they stand">
+      <SectionTitle>Where {first} stands</SectionTitle>
+      <Card className="divide-y divide-line">
+        <div className="px-5 py-4">
+          {owedToThem.length ? (
+            <>
+              <p className="text-[15px] font-semibold">
+                We owe {first} <Money amount={owed} />
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {owedToThem.map((x) => (
+                  <li key={x.link}>
+                    <Link to={x.link} className="flex flex-wrap items-baseline justify-between gap-x-4 text-[13.5px] text-ink-2 hover:text-ink">
+                      <span>{x.text}</span>
+                      <span className="font-mono text-[12.5px]">
+                        <Money amount={x.amount} /> · waiting {ageWords(x.since)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="flex items-center gap-2 text-[14px] text-ink-2">
+              <StatusShape shape="circle" tone="settled" size={9} />
+              We owe {first} nothing.
+            </p>
+          )}
+        </div>
+        <div className="px-5 py-4">
+          {openCases.length ? (
+            <>
+              <p className="text-[15px] font-semibold">
+                {openCases.length} {openCases.length === 1 ? 'case is' : 'cases are'} still open
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {openCases.map((x) => (
+                  <li key={x.link + x.text}>
+                    <Link to={x.link} className="block text-[13.5px] text-ink-2 hover:text-ink">
+                      {x.text} <span className="font-mono text-[12.5px] text-ink-3">· {ageWords(x.since)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="flex items-center gap-2 text-[14px] text-ink-2">
+              <StatusShape shape="circle" tone="settled" size={9} />
+              No open cases.
+            </p>
+          )}
+        </div>
+        <p className="px-5 py-3.5 text-[13px] text-ink-3">
+          {orders} {orders === 1 ? 'order or trip' : 'orders and trips'} · {disputes90d} {disputes90d === 1 ? 'dispute' : 'disputes'} in the last 90 days
+        </p>
+      </Card>
+    </section>
   );
 }

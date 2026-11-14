@@ -11,8 +11,9 @@ import { MoneySheet } from '../../components/Dialog';
 import { WHO } from '../../components/Choice';
 import { ClaimTag } from '../../components/ClaimBar';
 import { useAppSelector } from '../../store';
-import { useClaimMutation } from '../../store/api';
-import { Button, Field, Input, Money, PageHeader, Pagination, Status } from '../../components/ui';
+import { useAskRiderToFixBankMutation, useClaimMutation } from '../../store/api';
+import { QueueTop, Waited } from '../../components/NextCard';
+import { Button, Field, Input, Money, Pagination, Status } from '../../components/ui';
 
 /**
  * Money riders asked to move to their bank. Each stuck withdrawal offers only the one action that
@@ -31,13 +32,29 @@ export function Withdrawals() {
   const me = useAppSelector((s) => s.session.access?.email);
   const [claim, claiming] = useClaimMutation();
 
+  const [ask, asking] = useAskRiderToFixBankMutation();
+
+  /** What unsticks it, in plain words. Only "Bank turned it back" is fixed by sending again. */
+  const STEP: Record<NonNullable<Withdrawal['nextStep']>, string> = {
+    send_again: 'Bank turned it back',
+    pay_by_hand: 'Pay it by hand',
+    rider_fixes_bank: 'Rider must fix their bank details',
+    rider_asked: 'Waiting for the rider to fix their bank details',
+    top_up_wallet: 'Payout wallet needs topping up',
+    awaiting_approval: 'Waiting for a second approval',
+  };
   const why = (w: Withdrawal) =>
-    w.status === 'failed' ? `${w.lastError} · tried ${w.attempts} times` : w.status === 'manual' ? 'No checked bank account: send it from the bank, then record it here' : undefined;
+    w.nextStep === 'pay_by_hand'
+      ? 'No checked bank account: send it from the bank, then record it here'
+      : w.nextStep === 'rider_asked'
+        ? `Asked ${formatDate(w.riderAskedAt)} · the bank said: ${w.lastError}`
+        : w.lastError
+          ? `The bank said: ${w.lastError} · tried ${w.attempts} times`
+          : undefined;
 
   const action = (w: Withdrawal) => {
-    if (w.status !== 'failed' && w.status !== 'manual') return null;
-    if (w.awaitingApproval) return <Status status="pending" word="Waiting for approval" />;
-    if (!mayMove) return <span className="text-[12px] text-ink-3">{WHO.move_money} act on this</span>;
+    if (!w.nextStep) return null;
+    if (w.nextStep === 'awaiting_approval' || w.nextStep === 'rider_asked') return null;
     if (w.claim && w.claim.by !== me)
       return (
         <span className="flex flex-col items-end gap-1">
@@ -47,7 +64,15 @@ export function Withdrawals() {
           </Button>
         </span>
       );
-    return w.status === 'failed' ? (
+    if (w.nextStep === 'rider_fixes_bank')
+      return (
+        <Button size="sm" busy={asking.isLoading && asking.originalArgs?.id === w.id} onClick={() => ask({ id: w.id })}>
+          Ask {w.rider.name.split(' ')[0]} to fix it
+        </Button>
+      );
+    if (w.nextStep === 'top_up_wallet') return <span className="text-right text-[12px] text-ink-3">Finance tops up the payout wallet, then sends again</span>;
+    if (!mayMove) return <span className="text-[12px] text-ink-3">{WHO.move_money} act on this</span>;
+    return w.nextStep === 'send_again' ? (
       <Button size="sm" variant="primary" onClick={() => setActing({ w, action: 'retry' })}>
         Send again
       </Button>
@@ -63,10 +88,28 @@ export function Withdrawals() {
       </Button>
     );
   };
+  const state = (w: Withdrawal) =>
+    w.nextStep ? (
+      <>
+        <span className="text-[13px] font-medium">{STEP[w.nextStep]}</span>
+        {why(w) && <p className="mt-1 max-w-[36ch] text-[12px] text-ink-3">{why(w)}</p>}
+      </>
+    ) : (
+      <Status status={w.status} />
+    );
 
   return (
     <>
-      <PageHeader service="express" eyebrow="DezenExpress" title="Rider withdrawals" description="Money riders asked to move from their wallet to their bank." />
+      <QueueTop
+        queue="withdrawals"
+        service="express"
+        eyebrow="DezenExpress"
+        title="Rider withdrawals"
+        who={['rider', 'riders']}
+        waitFor="for their money"
+        description="Grouped by what unsticks each one. Only a bank that turned it back is fixed by sending again."
+        clear={['Every rider has been paid.', 'No withdrawal is stuck.']}
+      />
       <ListToolbar
         q={list.q}
         status={list.status}
@@ -89,29 +132,16 @@ export function Withdrawals() {
         settledWhenEmpty={list.status === 'stuck'}
         mobile={(w) => ({
           title: w.rider.name,
-          subtitle: why(w) ?? `${w.bank} ${w.accountNumberMasked} · ${formatDate(w.requestedAt)}`,
+          subtitle: w.nextStep ? STEP[w.nextStep] : `${w.bank} ${w.accountNumberMasked} · ${formatDate(w.requestedAt)}`,
           amount: <Money amount={w.amount} />,
-          status: action(w) ?? <Status status={w.status} />,
+          status: <Waited since={w.requestedAt} promiseHours={24} />,
         })}
         columns={[
           { header: 'Rider', cell: (w) => <span className="font-semibold">{w.rider.name}</span> },
           { header: 'Amount', align: 'right', cell: (w) => <Money amount={w.amount} /> },
           { header: 'To', cell: (w) => <span className="font-mono text-[12.5px]">{w.bank} {w.accountNumberMasked}</span> },
-          {
-            header: 'Status',
-            cell: (w) => (
-              <>
-                <Status status={w.status} />
-                {why(w) && <p className="mt-1 max-w-[34ch] text-[12px] text-ink-3">{why(w)}</p>}
-                {w.claim && (
-                  <p className="mt-1">
-                    <ClaimTag claim={w.claim} />
-                  </p>
-                )}
-              </>
-            ),
-          },
-          { header: 'Asked', cell: (w) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(w.requestedAt)}</span> },
+          { header: 'What it needs', cell: state },
+          { header: 'Waiting', align: 'right', cell: (w) => <Waited since={w.requestedAt} promiseHours={24} /> },
           { header: '', cell: (w) => <div className="flex justify-end">{action(w)}</div> },
         ]}
       />
@@ -123,7 +153,14 @@ export function Withdrawals() {
           title="Send the withdrawal again"
           amount={acting.w.amount}
           recipient={{ name: acting.w.rider.name, detail: `${acting.w.bank} ${acting.w.accountNumberMasked}` }}
-          consequence={`Last time the bank said: ${acting.w.lastError}. If it actually went through, it will not be paid twice: this reuses the same payment reference.`}
+          consequence={
+            <>
+              <span className="block font-semibold text-ink">What happened before</span>
+              Tried {acting.w.attempts} {acting.w.attempts === 1 ? 'time' : 'times'}
+              {acting.w.lastAttemptAt ? `, last on ${formatDate(acting.w.lastAttemptAt)}` : ''}, to {acting.w.bank} {acting.w.accountNumberMasked}. The bank said: {acting.w.lastError}.
+              <span className="mt-1.5 block">If an earlier try did go through, the rider is not paid twice: this reuses the same payment reference.</span>
+            </>
+          }
           irreversible={false}
           actionLabel={`Send ₦${acting.w.amount.toLocaleString('en-NG')} to ${acting.w.rider.name.split(' ')[0]}`}
           onClose={() => setActing(null)}

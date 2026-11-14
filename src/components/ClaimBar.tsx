@@ -41,6 +41,7 @@ export function ClaimBar({ kind, id, claim, compact }: { kind: ClaimKind; id: st
   ) : mine ? (
     <>
       <span className="font-semibold">You</span> are handling this since {time(claim!.since)}
+      <span className="text-ink-3"> · lets go by itself after 2 hours with no action</span>
     </>
   ) : (
     <>Nobody is handling this yet</>
@@ -52,7 +53,7 @@ export function ClaimBar({ kind, id, claim, compact }: { kind: ClaimKind; id: st
         className={`flex flex-wrap items-center justify-between gap-3 rounded-leaf-sm border px-4 py-3 text-[14px] ${other ? 'border-waiting/45 bg-waiting/[0.07]' : mine ? 'border-settled/40 bg-settled/[0.06]' : 'border-line bg-surface'}`}
       >
         <span className="flex items-center gap-2.5">
-          <StatusShape shape={other ? 'petal' : mine ? 'circle' : 'ring'} tone={other ? 'waiting' : mine ? 'settled' : 'quiet'} size={9} />
+          <StatusShape shape={other ? 'ring' : mine ? 'circle' : 'ring'} tone={other ? 'waiting' : mine ? 'settled' : 'quiet'} size={9} />
           <span>{text}</span>
         </span>
         {other ? (
@@ -89,7 +90,7 @@ export function ClaimTag({ claim }: { claim?: Claim | null }) {
   const mine = claim.by === me;
   return (
     <span className={`inline-flex items-center gap-1.5 text-[12px] ${mine ? 'text-settled' : 'text-waiting'}`}>
-      <StatusShape shape={mine ? 'circle' : 'petal'} tone={mine ? 'settled' : 'waiting'} size={7} />
+      <StatusShape shape={mine ? 'circle' : 'ring'} tone={mine ? 'settled' : 'waiting'} size={7} />
       {mine ? 'You are on it' : `${claim.name.split(' ')[0]} is on it`}
     </span>
   );

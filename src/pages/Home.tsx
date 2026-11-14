@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FiArrowRight, FiRefreshCw } from 'react-icons/fi';
 import { errorMessage } from '../lib/errors';
 import { useAppSelector } from '../store';
-import { useClaimMutation, useHomeQuery, useSearchQuery } from '../store/api';
-import type { HomeGroup, HomeNext, HomeRow, HomeService, HomeToday, SearchResult } from '../store/types';
+import { useHomeQuery, useSearchQuery } from '../store/api';
+import type { HomeGroup, HomeRow, HomeService, HomeToday, SearchResult } from '../store/types';
 import { LivingMark, SERVICE_NAME, ServiceGlyph, StatusShape } from '../components/brand';
-import { Button, Card, Empty, ErrorNote, Loading, Money, PageHeader } from '../components/ui';
+import { NextCard } from '../components/NextCard';
+import { Card, Empty, ErrorNote, Loading, Money, PageHeader, Status } from '../components/ui';
 import { TopSearch } from '../components/Layout';
 
 const hoursSince = (iso?: string) => (iso ? (Date.now() - new Date(iso).getTime()) / 3_600_000 : 0);
@@ -96,72 +97,6 @@ export function Home() {
         </aside>
       </div>
     </>
-  );
-}
-
-/** The one thing to take next, person first. "Take it" claims it, so nobody else works it, then opens it. */
-function NextCard({ next, waiting, viewOnly }: { next: HomeNext | null; waiting: number; viewOnly: boolean }) {
-  const navigate = useNavigate();
-  const [claim, claiming] = useClaimMutation();
-  const [error, setError] = useState('');
-
-  if (!next) {
-    // Only claim "everyone has what they were promised" when it is true.
-    const [title, line] =
-      waiting === 0
-        ? ['Nothing is waiting on you.', 'Every rider, vendor and buyer you look after has what they were promised.']
-        : viewOnly
-          ? ['Nothing here needs you to act.', 'The people below are with teammates who can pay, rule or approve. Open any row to see where it stands when someone asks you.']
-          : ['Everything waiting is already taken.', 'A teammate is on each one. Open a row to see who has it.'];
-    return (
-      <Card className="flex items-center gap-5 p-6 sm:p-7">
-        <span aria-hidden className="grid shrink-0 grid-cols-2 gap-1">
-          {[0, 1, 2, 3].map((i) => (
-            <span key={i} className={`h-3 w-3 rounded-full ${waiting === 0 ? 'bg-settled' : 'border-2 border-ink-3'}`} />
-          ))}
-        </span>
-        <div>
-          <p className="text-[18px] font-semibold">{title}</p>
-          <p className="mt-1 text-[14px] text-ink-2">{line}</p>
-        </div>
-      </Card>
-    );
-  }
-
-  const take = async () => {
-    setError('');
-    if (next.claim && !next.yours) {
-      const res = await claim(next.claim);
-      if ('error' in res) return setError(errorMessage(res.error));
-    }
-    navigate(next.link);
-  };
-  const late = hoursSince(next.waitingSince) > 24;
-
-  return (
-    <section aria-labelledby="next-title" className="@container relative overflow-hidden rounded-leaf border border-line bg-surface">
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${late ? 'bg-need' : 'bg-waiting'}`} />
-      {/* Sized by the card, not the window: beside the aside the column can be narrow on a wide screen. */}
-      <div className="grid gap-6 p-6 @md:p-8 @xl:grid-cols-[minmax(0,1fr)_auto] @xl:items-end">
-        <div className="min-w-0">
-          <p className="mb-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">
-            <ServiceGlyph service={next.service} size={14} />
-            {next.yours ? 'You are on this' : 'Next for you'} · {next.kind}
-          </p>
-          <h2 id="next-title" className="text-[22px] font-semibold leading-snug tracking-tight text-balance @md:text-[27px]">
-            {next.title}
-          </h2>
-          <p className="mt-2.5 max-w-[60ch] text-[14.5px] leading-relaxed text-ink-2">{next.why}</p>
-          {error && <p className="mt-2 text-[13px] text-need">{error}</p>}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-4 @xl:flex-col @xl:items-end">
-          {typeof next.amount === 'number' && <Money amount={next.amount} className="text-[22px] @md:text-[26px]" />}
-          <Button variant="primary" size="lg" busy={claiming.isLoading} onClick={take} className="min-w-[9rem]">
-            {next.yours ? 'Continue' : 'Take it'}
-          </Button>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -310,16 +245,20 @@ function Today({ today, me }: { today: HomeToday; me?: string }) {
   );
 }
 
-const KIND: Record<SearchResult['kind'], string> = { person: 'People', order: 'Orders', booking: 'Trips', payment: 'Payments', vendor: 'Vendors', rider: 'Riders' };
+/** Customers, riders and kitchens are all people to staff: one group, said in the subtitle. */
+const GROUPS: { label: string; kinds: SearchResult['kind'][] }[] = [
+  { label: 'People', kinds: ['person', 'rider', 'vendor'] },
+  { label: 'Orders', kinds: ['order'] },
+  { label: 'Trips', kinds: ['booking'] },
+  { label: 'Payments', kinds: ['payment'] },
+];
 
 /** One box for everything: names, emails, phones, order and trip references, payment references. */
 export function Search() {
   const [params] = useSearchParams();
   const q = params.get('q') ?? '';
   const { data, isFetching, error } = useSearchQuery(q, { skip: q.trim().length < 2 });
-  const groups = Object.entries(KIND)
-    .map(([kind, label]) => ({ label, items: (data ?? []).filter((r) => r.kind === kind) }))
-    .filter((g) => g.items.length);
+  const groups = GROUPS.map((g) => ({ label: g.label, items: (data ?? []).filter((r) => g.kinds.includes(r.kind)) })).filter((g) => g.items.length);
   return (
     <>
       <div className="mb-6 md:hidden">
@@ -352,6 +291,12 @@ export function Search() {
                         <span className={`block font-semibold ${r.kind === 'order' || r.kind === 'booking' || r.kind === 'payment' ? 'font-mono text-[14px]' : 'text-[15px]'}`}>{r.title}</span>
                         <span className="block truncate text-[13px] text-ink-3">{r.subtitle}</span>
                       </span>
+                      {(r.status || typeof r.amount === 'number') && (
+                        <span className="flex shrink-0 flex-col items-end gap-0.5">
+                          {typeof r.amount === 'number' && <Money amount={r.amount} className="text-[13.5px]" />}
+                          {r.status && <Status status={r.status} />}
+                        </span>
+                      )}
                       <FiArrowRight aria-hidden className="h-4 w-4 shrink-0 text-ink-3 transition-transform group-hover:translate-x-0.5" />
                     </Link>
                   </li>

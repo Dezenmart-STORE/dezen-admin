@@ -246,18 +246,38 @@ const GOODS: [string, number, string][] = [
 ];
 const sellerPeople = people.filter((p) => p.isSeller);
 
+/** Sample naira per coin. The real backend fixes the naira value at the moment of payment. */
+export const NGN_PER: Record<string, number> = { cUSD: 1560, USDT: 1560, USDC: 1560, cEUR: 1690, cREAL: 285, cKES: 12 };
+export const toNgn = (amount: number, currency: string) => (currency === 'NGN' ? amount : Math.round(amount * (NGN_PER[currency] ?? 0)));
+
 export const products: Product[] = GOODS.map(([n, price, category], i) => {
   const seller = sellerPeople[i % sellerPeople.length];
+  const currency = pick(['cUSD', 'USDT']);
   return {
     id: id('pr', i + 1),
     name: n,
     seller: { id: seller.id, name: seller.name },
     price,
-    currency: pick(['cUSD', 'USDT']),
+    currency,
+    priceNgn: toNgn(price, currency),
     stock: int(0, 80),
     category,
     visible: i !== 6,
     reports: i === 3 ? 4 : i === 5 ? 2 : 0,
+    reportNotes:
+      i === 3
+        ? [
+            { text: 'It got very hot while charging and the case swelled', at: ago(20) },
+            { text: 'Says 20,000mAh but barely charges my phone twice', at: ago(44) },
+            { text: 'Same as the others: it gets hot', at: ago(70) },
+            { text: 'Not the brand in the photos', at: ago(96) },
+          ]
+        : i === 5
+          ? [
+              { text: 'Stopped working after two days', at: ago(30) },
+              { text: 'Screen scratched when it arrived', at: ago(60) },
+            ]
+          : undefined,
     sponsored: i === 0,
     createdAt: ago(int(20, 3000)),
   };
@@ -277,6 +297,7 @@ export const shopOrders: ShopOrder[] = Array.from({ length: 30 }, (_, i) => {
     seller: product.seller,
     amount: product.price * quantity,
     currency: product.currency,
+    amountNgn: toNgn(product.price * quantity, product.currency),
     quantity,
     held: ['accepted', 'shipped', 'delivered', 'disputed'].includes(status),
     createdAt: ago(int(1, 400)),
@@ -421,6 +442,7 @@ withdrawals[1].claim = { by: 'finance@dezenmart.com', name: 'Femi Finance', sinc
       status: 'failed',
       attempts: 5,
       lastError: 'Account name does not match',
+      bankDetailsUpdatedAt: ago(3),
       bank: verifiedRiders[1].payoutAccount?.bankName ?? 'Access Bank',
       accountNumberMasked: verifiedRiders[1].payoutAccount?.accountNumberMasked ?? '******9013',
       requestedAt: ago(52),
@@ -450,12 +472,12 @@ export const approvals: Approval[] = [
 
 /** People settled today, newest first. Money actions in the sample backend add to it. */
 export const settled: HomeToday['settled'] = [
-  { text: `${people[4].name.split(' ')[0]} has her refund`, amount: 3450, by: 'finance@dezenmart.com', at: ago(0.6) },
+  { text: `${people[4].name.split(' ')[0]} got their refund`, amount: 3450, by: 'finance@dezenmart.com', at: ago(0.6) },
   { text: 'Mama Put Kitchen was paid for 6 orders', amount: 42300, by: 'finance@dezenmart.com', at: ago(1.3) },
   { text: `${riders[7].name} can withdraw again`, amount: 18400, by: 'you@dezenmart.com', at: ago(2.1) },
   { text: 'Chop Life Grill can sell now', by: 'foods.ops@dezenmart.com', at: ago(2.8) },
   { text: `${people[9].name.split(' ')[0]} got a trip refund`, amount: 2900, by: 'finance@dezenmart.com', at: ago(3.4) },
-  { text: `${riders[9].name} can drive now`, by: 'foods.ops@dezenmart.com', at: ago(4.2) },
+  { text: `${riders[9].name} can drive now`, by: 'owner@dezenmart.com', at: ago(4.2) },
   { text: 'Suya Spot was paid for 3 orders', amount: 15600, by: 'you@dezenmart.com', at: ago(5.1) },
 ];
 /** The last 7 days, oldest first (today is filled in live). */
@@ -479,10 +501,20 @@ export const staff: StaffMember[] = [
   { id: 's5', name: 'Old Contractor', email: 'contractor@dezenmart.com', capabilities: ['support'], services: ['shopping'], authenticatorSet: true, disabled: true, lastSignInAt: ago(1500), createdAt: ago(3000) },
 ];
 
+/** What each seeded "settled" line was, as the log records it. */
+const SETTLED_LOG: { capability: AuditEvent['capability']; service: AuditEvent['service']; summary: string; action: string; reason?: string }[] = [
+  { capability: 'move_money', service: 'food', summary: `Sent a ₦3,450 refund to ${people[4].name}`, action: 'POST /admin/food/orders/:id/retry-money', reason: 'Bank was back up' },
+  { capability: 'move_money', service: 'food', summary: 'Paid Mama Put Kitchen ₦42,300 for 6 orders', action: 'POST /admin/food/orders/:id/retry-money', reason: 'Payout account fixed' },
+  { capability: 'move_money', service: 'express', summary: `Sent ₦18,400 to ${riders[7].name} again`, action: 'POST /admin/express/withdrawals/:id/retry', reason: 'Bank unavailable earlier' },
+  { capability: 'verify', service: 'food', summary: 'Approved vendor Chop Life Grill', action: 'POST /admin/food/vendors/:id/review' },
+  { capability: 'move_money', service: 'express', summary: `Refunded ₦2,900 to ${people[9].name}`, action: 'POST /admin/express/bookings/:id/refund', reason: 'Trip was cancelled' },
+  { capability: 'verify', service: 'express', summary: `Approved rider ${riders[9].name}`, action: 'PATCH /admin/express/riders/:id/verify' },
+  { capability: 'move_money', service: 'food', summary: 'Paid Suya Spot ₦15,600 for 3 orders', action: 'POST /admin/food/orders/:id/retry-money', reason: 'Payout account fixed' },
+];
 export const audit: AuditEvent[] = [
-  { id: 'a3', staffEmail: 'finance@dezenmart.com', capability: 'move_money', service: 'shopping', summary: `Ruled "refund buyer" on ${shopDisputes[1]?.order.orderRef}`, action: 'POST /admin/shopping/disputes/:id/ruling', reason: 'Photos show the wrong colour', outcome: 'done', requestId: 'req-3', at: ago(3) },
+  ...settled.map((x, i) => ({ id: `as${i}`, staffEmail: x.by, ...SETTLED_LOG[i], outcome: 'done' as const, requestId: `req-s${i}`, at: x.at })),
+  { id: 'a3', staffEmail: 'finance@dezenmart.com', capability: 'move_money', service: 'shopping', summary: `Ruled "refund buyer" on ${shopDisputes[1]?.order.orderRef}`, action: 'POST /admin/shopping/disputes/:id/ruling', reason: 'Photos show the wrong colour', outcome: 'done', requestId: 'req-3', at: ago(6) },
   { id: 'a2', staffEmail: 'foods.ops@dezenmart.com', capability: 'move_money', service: 'food', summary: 'Tried to retry a vendor payout', action: 'POST /admin/food/orders/:id/retry-money', outcome: 'refused', requestId: 'req-2', at: ago(20) },
-  { id: 'a1', staffEmail: 'owner@dezenmart.com', capability: 'verify', service: 'food', summary: 'Approved vendor Chop Life Grill', action: 'POST /admin/food/vendors/:id/review', outcome: 'done', requestId: 'req-1', at: ago(48) },
 ];
 
 // ── timelines ────────────────────────────────────────────────────────────────

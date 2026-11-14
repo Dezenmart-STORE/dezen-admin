@@ -7,13 +7,15 @@ import { useFoodOrderQuery, useResolveFoodDisputeMutation, useRetryFoodMoneyMuta
 import type { FoodOrderDetail } from '../../store/types';
 import { RecordPage } from '../../components/RecordPage';
 import { MoneySheet } from '../../components/Dialog';
-import { Choice, WHO } from '../../components/Choice';
+import { WHO } from '../../components/Choice';
 import { PersonLink } from '../../components/PersonLink';
+import { ageWords, isLate } from '../../components/NextCard';
 import { StatusShape } from '../../components/brand';
 import { ClaimBar, useClaimedByOther } from '../../components/ClaimBar';
 import { Button, Card, ErrorNote, KeyValues, Locked, Money, SectionTitle, Status } from '../../components/ui';
 
-type Dialog = 'retry' | 'refund_buyer' | 'release_to_vendor' | null;
+type Dialog = 'retry' | 'ruling' | null;
+type Split = { back: number; vendor: number; all: 'buyer' | 'vendor' | null };
 
 const ordinal = (n: number) => (n === 1 ? 'first' : n === 2 ? 'second' : n === 3 ? 'third' : `${n}th`);
 
@@ -25,6 +27,7 @@ export function FoodOrderDetail() {
   const [retry] = useRetryFoodMoneyMutation();
   const [resolve] = useResolveFoodDisputeMutation();
   const [dialog, setDialogState] = useState<Dialog>(null);
+  const [split, setSplit] = useState<Split | null>(null);
   // The sheet works from the order as it was when opened, so its receipt survives the refresh.
   const [snap, setSnap] = useState<FoodOrderDetail | null>(null);
   const setDialog = (d: Dialog) => {
@@ -55,10 +58,18 @@ export function FoodOrderDetail() {
       back={openDispute ? '/food/disputes' : '/food/orders'}
       backLabel={openDispute ? 'Food disputes' : 'Food orders'}
       service="food"
-      kind={openDispute ? 'Dispute · waiting for a ruling' : 'Food order'}
+      kind={openDispute ? `Dispute · ${o?.orderRef ?? ''}` : 'Food order'}
       loading={isLoading}
       error={errorMessage(error)}
-      title={<span className="font-mono">{o?.orderRef}</span>}
+      title={
+        openDispute && o?.dispute ? (
+          <>
+            {o.buyer.name} has waited <span className={isLate(o.dispute.openedAt, 48) ? 'text-need' : ''}>{ageWords(o.dispute.openedAt)}</span> for a ruling
+          </>
+        ) : (
+          <span className="font-mono">{o?.orderRef}</span>
+        )
+      }
       badge={o && <Status status={o.status} />}
       actions={retryAction}
       timeline={o?.timeline}
@@ -113,10 +124,18 @@ export function FoodOrderDetail() {
               </Card>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {mayMove ? (
-                  <>
-                    <Choice title="Refund the buyer" amount={o.total} consequence={`${o.buyer.name} gets it all back. ${o.vendor.name} is not paid.`} onChoose={() => setDialog('refund_buyer')} />
-                    <Choice title="Pay the vendor" amount={o.subtotal} consequence={`${o.vendor.name} is paid for the food. ${o.buyer.name} gets nothing back.`} onChoose={() => setDialog('release_to_vendor')} />
-                  </>
+                  <div className="sm:col-span-2">
+                    <SplitRuling
+                      total={o.total}
+                      food={o.subtotal}
+                      buyer={o.buyer.name}
+                      vendor={o.vendor.name}
+                      onRule={(s) => {
+                        setSplit(s);
+                        setDialog('ruling');
+                      }}
+                    />
+                  </div>
                 ) : (
                   <p className="text-sm text-ink-3 sm:col-span-2">
                     {heldBy ? `${heldBy.name} is handling this dispute. Take it over above to rule on it.` : `${WHO.move_money} make the ruling on disputes.`}
@@ -188,31 +207,40 @@ export function FoodOrderDetail() {
               onConfirm={async ({ code }) => receiptOf(await retry({ id: snap.id, amount: snapFailed.amount, code }))}
             />
           )}
-          {snap && (
+          {snap && split && (
             <MoneySheet
-              open={dialog === 'refund_buyer' || dialog === 'release_to_vendor'}
+              open={dialog === 'ruling'}
               eyebrow={`${snap.orderRef} · ruling`}
-              title={dialog === 'refund_buyer' ? 'Refund the buyer' : 'Pay the vendor'}
-              amount={dialog === 'refund_buyer' ? snap.total : snap.subtotal}
-              recipient={dialog === 'refund_buyer' ? { name: snap.buyer.name, detail: 'Back to the account they paid from' } : { name: snap.vendor.name, detail: 'To their payout account on file' }}
+              title={split.all === 'buyer' ? 'Refund the buyer' : split.all === 'vendor' ? 'Pay the vendor' : 'Split the order'}
+              amount={split.all === 'vendor' ? split.vendor : split.back}
+              recipient={
+                split.all === 'vendor'
+                  ? { name: snap.vendor.name, detail: 'To their payout account on file' }
+                  : { name: snap.buyer.name, detail: 'Back to the account they paid from' }
+              }
               consequence={
-                dialog === 'refund_buyer'
-                  ? `${snap.buyer.name} gets everything back, and ${snap.vendor.name} is not paid for this order.`
-                  : `${snap.vendor.name} is paid for the food, and ${snap.buyer.name} gets nothing back.`
+                split.all === 'buyer'
+                  ? `${snap.buyer.name} gets everything back, fees included, and ${snap.vendor.name} is not paid for this order.`
+                  : split.all === 'vendor'
+                    ? `${snap.vendor.name} is paid for the food, and ${snap.buyer.name} gets nothing back.`
+                    : `${snap.vendor.name} is paid ₦${split.vendor.toLocaleString('en-NG')} for the rest of the food. Delivery and service fees are kept.`
               }
               danger
               actionLabel={
-                dialog === 'refund_buyer'
-                  ? `Refund ₦${snap.total.toLocaleString('en-NG')} to ${snap.buyer.name.split(' ')[0]}`
-                  : `Pay ₦${snap.subtotal.toLocaleString('en-NG')} to ${snap.vendor.name}`
+                split.all === 'vendor'
+                  ? `Pay ₦${split.vendor.toLocaleString('en-NG')} to ${snap.vendor.name}`
+                  : split.all === 'buyer'
+                    ? `Refund ₦${split.back.toLocaleString('en-NG')} to ${snap.buyer.name.split(' ')[0]}`
+                    : `Refund ₦${split.back.toLocaleString('en-NG')} to ${snap.buyer.name.split(' ')[0]}, pay the rest`
               }
               onClose={() => setDialog(null)}
               onConfirm={async ({ code, reason }) =>
                 receiptOf(
                   await resolve({
                     id: snap.id,
-                    resolution: dialog as 'refund_buyer' | 'release_to_vendor',
-                    amount: dialog === 'refund_buyer' ? snap.total : snap.subtotal,
+                    resolution: split.all === 'buyer' ? 'refund_buyer' : split.all === 'vendor' ? 'release_to_vendor' : 'split',
+                    amount: split.all === 'vendor' ? split.vendor : split.back,
+                    vendorAmount: split.all ? undefined : split.vendor,
                     code,
                     reason,
                   }),
@@ -223,5 +251,85 @@ export function FoodOrderDetail() {
         </>
       )}
     </RecordPage>
+  );
+}
+
+/**
+ * The ruling as a split, not a coin toss. "Half the order was missing" deserves half back.
+ * The buyer and vendor share the food price; delivery and service fees are kept unless
+ * everything goes back to the buyer.
+ */
+function SplitRuling({ total, food, buyer, vendor, onRule }: { total: number; food: number; buyer: string; vendor: string; onRule: (s: Split) => void }) {
+  type Stop = 'buyer' | 'half' | 'vendor' | 'typed';
+  const [stop, setStop] = useState<Stop>('half');
+  const [typed, setTyped] = useState('');
+  const typedBack = Math.round(Number(typed.replace(/[,\s₦]/g, '')));
+  const back = stop === 'buyer' ? total : stop === 'vendor' ? 0 : stop === 'half' ? Math.round(food / 2) : typedBack;
+  const toVendor = stop === 'buyer' ? 0 : stop === 'vendor' ? food : food - back;
+  const valid = stop === 'buyer' || stop === 'vendor' || stop === 'half' || (typedBack > 0 && typedBack < food);
+  const buyerPct = stop === 'buyer' ? 100 : Math.max(0, Math.min(100, Math.round((back / food) * 100)));
+  const first = buyer.split(' ')[0];
+  const STOPS: { v: Stop; label: string }[] = [
+    { v: 'buyer', label: `All to ${first}` },
+    { v: 'half', label: 'Half' },
+    { v: 'vendor', label: 'All to the vendor' },
+    { v: 'typed', label: 'Type an amount' },
+  ];
+  return (
+    <Card className="p-5 sm:p-6">
+      <p className="text-[15px] font-semibold">Who gets the money?</p>
+      <div role="radiogroup" aria-label="Ruling" className="mt-3 flex flex-wrap gap-1.5">
+        {STOPS.map((s) => (
+          <button
+            key={s.v}
+            type="button"
+            role="radio"
+            aria-checked={stop === s.v}
+            onClick={() => setStop(s.v)}
+            className={`h-9 cursor-pointer rounded-leaf-sm border px-3.5 text-[13px] font-medium transition-colors ${stop === s.v ? 'border-transparent bg-primary text-on-primary' : 'border-line text-ink-2 hover:border-ink-3 hover:text-ink'}`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+      {stop === 'typed' && (
+        <label className="mt-4 block max-w-[16rem]">
+          <span className="mb-1.5 block text-[13px] font-semibold">Back to {first} (₦)</span>
+          <input
+            inputMode="decimal"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="h-11 w-full rounded-leaf-sm border border-line bg-ground px-3.5 font-mono text-[14.5px] focus:border-ink-2 focus:outline-none"
+          />
+          <span className="mt-1.5 block text-xs text-ink-3">Between ₦1 and ₦{(food - 1).toLocaleString('en-NG')}. The rest goes to the vendor.</span>
+        </label>
+      )}
+      <div aria-hidden className="mt-5 flex h-3 overflow-hidden rounded-full bg-raised">
+        <span className="bg-need transition-[width] duration-300" style={{ width: `${valid ? buyerPct : 0}%` }} />
+        <span className="flex-1 bg-ink-3/60" />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-4 text-[13px] text-ink-2">
+        <div>
+          Back to {buyer}
+          <span className="mt-0.5 block font-mono text-[18px] font-semibold text-ink">{valid ? <Money amount={back} /> : '—'}</span>
+        </div>
+        <div className="text-right">
+          To {vendor}
+          <span className="mt-0.5 block font-mono text-[18px] font-semibold text-ink">{valid ? <Money amount={toVendor} /> : '—'}</span>
+        </div>
+      </div>
+      <p className="mt-3 text-[12.5px] text-ink-3">
+        {stop === 'buyer' ? 'Everything they paid comes back, delivery and service fee included.' : 'They share the food price. Delivery and service fees are kept.'}
+      </p>
+      <Button
+        variant="primary"
+        size="lg"
+        className="mt-5 w-full sm:w-auto"
+        disabled={!valid}
+        onClick={() => onRule({ back, vendor: toVendor, all: stop === 'buyer' ? 'buyer' : stop === 'vendor' ? 'vendor' : null })}
+      >
+        Rule this way
+      </Button>
+    </Card>
   );
 }

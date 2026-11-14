@@ -9,6 +9,7 @@ export function Choice({
   title,
   amount,
   currency,
+  ngn,
   consequence,
   onChoose,
   disabled,
@@ -16,6 +17,7 @@ export function Choice({
   title: string;
   amount: number;
   currency?: string;
+  ngn?: number;
   consequence: ReactNode;
   onChoose: () => void;
   disabled?: boolean;
@@ -29,7 +31,7 @@ export function Choice({
     >
       <span className="text-[15px] font-semibold">{title}</span>
       <span className="text-[22px]">
-        <Money amount={amount} currency={currency} />
+        <Money amount={amount} currency={currency} ngn={ngn} />
       </span>
       <span className="text-[13px] text-ink-2">{consequence}</span>
       <span className="mt-2 text-[13px] font-semibold underline-offset-4 group-hover:underline">Choose →</span>

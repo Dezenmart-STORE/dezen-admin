@@ -1,23 +1,21 @@
 import { useState } from 'react';
-import { errorMessage, failureOf, receiptOf } from '../../lib/errors';
+import { errorMessage, receiptOf } from '../../lib/errors';
 import { formatDate, humanize } from '../../lib/format';
 import { useListParams } from '../../lib/useListParams';
 import { useCan } from '../../store';
-import { useAdjustRiderWalletMutation, useRidersQuery, useVerifyRiderMutation } from '../../store/api';
+import { useAdjustRiderWalletMutation, useRidersQuery } from '../../store/api';
 import type { Rider } from '../../store/types';
 import { Table } from '../../components/Table';
-import { ConfirmDialog, MoneySheet } from '../../components/Dialog';
+import { MoneySheet } from '../../components/Dialog';
 import { ListToolbar } from '../../components/ListToolbar';
-import { WHO } from '../../components/Choice';
+import { QueueTop, Waited } from '../../components/NextCard';
 import { Button, Field, Input, Money, PageHeader, Pagination, Segments, Status, Tag } from '../../components/ui';
 
 export function Riders() {
   const can = useCan();
   const list = useListParams({ status: 'pending' });
   const { data, isLoading, isFetching, error } = useRidersQuery(list.args);
-  const [verify] = useVerifyRiderMutation();
   const [adjust] = useAdjustRiderWalletMutation();
-  const [acting, setActing] = useState<{ rider: Rider; to: 'verified' | 'rejected' } | null>(null);
   const [wallet, setWallet] = useState<Rider | null>(null);
   const [amount, setAmount] = useState('');
   const [direction, setDirection] = useState<'credit' | 'debit'>('debit');
@@ -27,16 +25,6 @@ export function Riders() {
 
   const actions = (r: Rider) => (
     <div className="flex flex-wrap justify-end gap-2">
-      {can('verify', 'express') && r.status !== 'verified' && (
-        <Button size="sm" variant="primary" onClick={() => setActing({ rider: r, to: 'verified' })}>
-          Approve
-        </Button>
-      )}
-      {can('verify', 'express') && r.status === 'pending' && (
-        <Button size="sm" variant="danger" onClick={() => setActing({ rider: r, to: 'rejected' })}>
-          Reject
-        </Button>
-      )}
       {r.status === 'verified' &&
         (can('move_money', 'express') ? (
           <Button
@@ -51,13 +39,25 @@ export function Riders() {
             Correct wallet
           </Button>
         ) : null)}
-      {!can('verify', 'express') && r.status === 'pending' && <span className="text-[12px] text-ink-3">{WHO.verify} decide</span>}
     </div>
   );
 
   return (
     <>
-      <PageHeader service="express" eyebrow="DezenExpress" title="Riders" description="The people who drive and deliver. Approve only after checking the licence and plate against their documents." />
+      {list.status === 'pending' ? (
+        <QueueTop
+          queue="riders"
+          service="express"
+          eyebrow="DezenExpress"
+          title="Riders"
+          who={['rider', 'riders']}
+          waitFor="to start earning"
+          description="Open a rider to see their licence and plate photos beside what they typed. Approve unlocks once each check is ticked."
+          clear={['No riders are waiting to be checked.', 'Everyone who applied can drive or has been told what to fix.']}
+        />
+      ) : (
+        <PageHeader service="express" eyebrow="DezenExpress" title="Riders" description="The people who drive and deliver." />
+      )}
       <ListToolbar
         q={list.q}
         status={list.status}
@@ -76,12 +76,13 @@ export function Riders() {
         fetching={isFetching}
         error={errorMessage(error)}
         rowKey={(r) => r.id}
+        href={(r) => `/express/riders/${r.id}`}
         empty={list.status === 'pending' ? 'No riders are waiting for review.' : 'No riders match.'}
         settledWhenEmpty={list.status === 'pending'}
         mobile={(r) => ({
           title: r.name,
           subtitle: `${r.vehicleType} · ${r.plateNumber}`,
-          amount: actions(r),
+          amount: r.status === 'pending' ? <Waited since={r.createdAt} promiseHours={48} /> : <Money amount={r.walletBalance} />,
           status: <Status status={r.status} />,
         })}
         columns={[
@@ -122,26 +123,13 @@ export function Riders() {
           { header: 'Status', cell: (r) => <Status status={r.status} /> },
           { header: 'Trips', align: 'right', cell: (r) => <span className="font-mono">{r.tripsCompleted}</span> },
           { header: 'Wallet', align: 'right', cell: (r) => <Money amount={r.walletBalance} /> },
-          { header: 'Applied', cell: (r) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(r.createdAt)}</span> },
+          list.status === 'pending'
+            ? { header: 'Waiting', align: 'right', cell: (r) => <Waited since={r.createdAt} promiseHours={48} /> }
+            : { header: 'Applied', cell: (r) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(r.createdAt)}</span> },
           { header: '', cell: actions },
         ]}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}
-      <ConfirmDialog
-        open={!!acting}
-        title={acting ? `${acting.to === 'verified' ? 'Approve' : 'Reject'} ${acting.rider.name}` : ''}
-        summary={
-          acting?.to === 'verified'
-            ? `${acting.rider.name} can go online and take rides and deliveries. Licence ${acting.rider.licenceNumber}, plate ${acting.rider.plateNumber}.`
-            : 'They cannot go online, and they are told the reason.'
-        }
-        actionLabel={acting ? `${acting.to === 'verified' ? 'Approve' : 'Reject'} ${acting.rider.name.split(' ')[0]}` : ''}
-        askReason={acting?.to === 'rejected'}
-        reasonHint="The rider sees this."
-        danger={acting?.to === 'rejected'}
-        onClose={() => setActing(null)}
-        onConfirm={async (reason) => failureOf(await verify({ id: acting!.rider.id, status: acting!.to, reason }))}
-      />
       {wallet && (
         <MoneySheet
           open={!!wallet}

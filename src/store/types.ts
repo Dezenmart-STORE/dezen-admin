@@ -40,6 +40,8 @@ export interface Claim {
   by: string;
   name: string;
   since: string;
+  /** Last time the holder did something on it. A claim lapses after 2 hours without activity. */
+  activeAt?: string;
 }
 export type ClaimKind = 'food-order' | 'booking' | 'withdrawal' | 'shop-dispute';
 
@@ -54,8 +56,17 @@ export interface Approval {
   summary: string;
   amount: number;
   currency: string;
+  /** For coin amounts: the naira value fixed at payment. */
+  amountNgn?: number;
   recipient: string;
   reason: string;
+  /**
+   * What already happened to this money, so the approver never approves a resend blind:
+   * "Tried 5 times, last on 11 Nov, to Access Bank ******9013. The bank said: Account name does not match."
+   */
+  before?: string;
+  /** The requester's name, for people; requestedBy stays the email for the record. */
+  requestedByName?: string;
   requestedBy: string;
   requestedAt: string;
   /** The record the money belongs to, in the admin. */
@@ -103,6 +114,8 @@ export interface MoneyReceipt {
   reference: string;
   amount: number;
   currency: string;
+  /** For coin amounts: the naira value fixed at payment. */
+  amountNgn?: number;
   recipient: string;
   /**
    * "sent" once accepted by the bank or provider; "recorded" for a ruling or hand payment;
@@ -134,7 +147,29 @@ export interface HomeData {
   services: HomeService[];
 }
 
+/** Which queue page an item belongs to. */
+export type QueueKey = 'approvals' | 'withdrawals' | 'refunds' | 'food-money' | 'food-disputes' | 'shop-disputes' | 'riders' | 'vendors' | 'providers' | 'products';
+
+/**
+ * The top of a queue page, worked out for the person asking: how many people wait, how many are past
+ * our promise, and the one to take next (the one they hold, else the oldest nobody else holds).
+ */
+export interface QueueTop {
+  key: QueueKey;
+  promiseHours: number;
+  waitingPeople: number;
+  latePeople: number;
+  oldestAt?: string;
+  /** Others holding items here: "Femi on 1". */
+  claimedBy: { name: string; count: number }[];
+  /** False when the person can see this queue but cannot act on it. */
+  canAct: boolean;
+  next: HomeNext | null;
+}
+
 export interface HomeNext {
+  /** Our promise for this kind of work, in hours: 24 to pay or approve, 48 to rule or review. */
+  promiseHours?: number;
   /** "Rider withdrawal", "Refund due", "Dispute", "Approval". */
   kind: string;
   service: Service;
@@ -204,11 +239,41 @@ export interface SearchResult {
   title: string;
   subtitle: string;
   link: string;
+  /** Where it stands, so staff can answer without opening it. A status key the Status chip knows. */
+  status?: string;
+  /** Money at stake, in naira. */
+  amount?: number;
 }
 
 // ── DezenFoods ───────────────────────────────────────────────────────────────
 
 export type VendorStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+/**
+ * A newcomer to review (a kitchen, a rider, a delivery company), as one case: what they sent us,
+ * what to check it against, and the decision. Approve is refused unless every check is ticked;
+ * the ticked checks are saved with the decision in the activity log.
+ */
+export type ReviewKind = 'vendor' | 'rider' | 'provider';
+export interface ReviewCase {
+  kind: ReviewKind;
+  id: string;
+  service: Service;
+  /** The name staff call them by: "Ifeoma Nwosu", "Mama Put Kitchen". */
+  name: string;
+  /** One line under the name: "Motorbike · LAG-463AA". */
+  summary: string;
+  status: 'pending' | 'approved' | 'verified' | 'rejected' | 'suspended';
+  appliedAt: string;
+  /** What they typed when they applied. */
+  facts: { label: string; value: string }[];
+  /** What they uploaded. `url` is a short-lived link the backend signs; missing means no image to show. */
+  documents: { id: string; label: string; caption?: string; url?: string }[];
+  /** What to compare. `expected` is what they typed, shown beside the check. */
+  checks: { id: string; label: string; expected?: string }[];
+  /** Set when they were asked to fix something; they see this reason. */
+  rejectionReason?: string;
+}
 
 export interface Vendor {
   id: string;
@@ -310,6 +375,18 @@ export interface Withdrawal {
   status: 'pending' | 'processing' | 'paid' | 'failed' | 'manual';
   attempts: number;
   lastError?: string;
+  /** When the last attempt was made, so "Send again" can show what happened the first time. */
+  lastAttemptAt?: string;
+  /**
+   * What actually unsticks it, decided by the backend from the bank's answer. Sending again only helps
+   * when the cause was on the bank's side; a wrong account name needs the rider, an empty payout
+   * wallet needs finance to top it up.
+   */
+  nextStep?: 'send_again' | 'rider_fixes_bank' | 'top_up_wallet' | 'pay_by_hand' | 'awaiting_approval' | 'rider_asked';
+  /** When we last asked the rider to fix their bank details. */
+  riderAskedAt?: string;
+  /** When the rider changed their bank details after the bank refused the name. Sending again is then worth trying. */
+  bankDetailsUpdatedAt?: string;
   bank: string;
   accountNumberMasked: string;
   requestedAt: string;
@@ -337,6 +414,8 @@ export interface ShopOrder {
   seller: { id: string; name: string };
   amount: number;
   currency: string;
+  /** What the buyer paid in naira, fixed at the moment of payment. Staff see this; the coin amount is small print. */
+  amountNgn: number;
   quantity: number;
   /** Paid into the payment contract and held until delivery is confirmed. */
   held: boolean;
@@ -364,11 +443,15 @@ export interface Product {
   seller: { id: string; name: string };
   price: number;
   currency: string;
+  /** The price in naira at today's rate, for staff. */
+  priceNgn: number;
   stock: number;
   category: string;
   image?: string;
   visible: boolean;
   reports: number;
+  /** What buyers wrote when they reported it, newest first. */
+  reportNotes?: { text: string; at: string }[];
   sponsored: boolean;
   createdAt: string;
 }
@@ -401,6 +484,16 @@ export interface PersonDetail extends PersonSummary {
   /** Amounts are naira (currency 'NGN') except Shopping, which is priced in stablecoins such as cUSD. */
   activity: { service: Service; kind: 'order' | 'booking'; ref: string; status: string; amount: number; currency: string; at: string; link: string }[];
   payments: Payment[];
+  /**
+   * Where they stand with us, before their history: money we still owe them, cases still open,
+   * and how often they dispute. Support reads this first when the person calls.
+   */
+  standing: {
+    owedToThem: { text: string; amount: number; since: string; link: string }[];
+    openCases: { text: string; since: string; link: string }[];
+    disputes90d: number;
+    orders: number;
+  };
 }
 
 /** Full details: only from the reveal endpoint, and every reveal is logged. */
@@ -481,6 +574,8 @@ export interface StaffOverview {
 export interface AuditEvent {
   id: string;
   staffEmail: string;
+  /** The person's name, for reading; the email stays for the record. */
+  staffName?: string;
   capability?: Capability;
   service?: Service;
   /** Plain words, written by the backend: "Approved vendor Mama Put Kitchen". */

@@ -21,6 +21,26 @@ const FIELDS: { key: string; label: string; hint: string; unit: '%' | '₦' | '�
   { key: 'expressFare.largeParcelSurcharge', label: 'Large parcel', hint: 'Added for a large parcel', unit: '₦', group: 'Lowest fare a trip may be booked at' },
 ];
 
+/** Naira typed with separators, so 100000 reads as 100,000 and nobody miscounts the zeros. */
+const grouped = (v: string) => {
+  if (v === '' || Number.isNaN(Number(v))) return v;
+  const [whole, dec] = v.split('.');
+  return Number(whole).toLocaleString('en-NG') + (dec !== undefined ? `.${dec}` : '');
+};
+
+/** A real order and a real trip, priced with a set of fees: what staff are actually changing. */
+const SAMPLE_FOOD = 10_000;
+const SAMPLE_KM = 8;
+const price = (v: (k: string) => number) => {
+  const food = SAMPLE_FOOD;
+  const serviceFee = Math.round((food * v('foodServiceFeePercent')) / 100);
+  const commission = Math.round((food * v('foodCommissionPercent')) / 100);
+  const fare = Math.max(v('expressFare.baseFare') + v('expressFare.perKm') * SAMPLE_KM, v('expressFare.minFare'));
+  const premium = Math.round(fare * v('expressFare.premiumMultiplier'));
+  const platform = Math.round((fare * v('expressPlatformFeePercent')) / 100);
+  return { buyerPays: food + serviceFee, vendorGets: food - commission, fare, premium, riderGets: fare - platform };
+};
+
 const read = (s: SettingsShape, key: string) => String(key.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown>)?.[k], s));
 
 export function Settings() {
@@ -59,9 +79,9 @@ export function Settings() {
         eyebrow="Team"
         title="Fees and fares"
         description={data ? `Last changed ${formatDate(data.updatedAt)} by ${data.updatedBy}.` : undefined}
-        actions={mayEdit && <Button variant="primary" disabled={!changed.length || invalid} onClick={() => setConfirming(true)}>Save changes</Button>}
       />
-      <div className="space-y-6">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-6">
         {groups.map((g) => (
           <Card key={g} className="p-5">
             <SectionTitle>{g}</SectionTitle>
@@ -70,15 +90,30 @@ export function Settings() {
                 <Field key={f.key} label={`${f.label} (${f.unit})`} hint={f.hint}>
                   <Input
                     inputMode="decimal"
-                    value={form[f.key] ?? ''}
+                    value={f.unit === '₦' ? grouped(form[f.key] ?? '') : (form[f.key] ?? '')}
                     disabled={!mayEdit}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value.trim() })}
+                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value.replace(/[,\s₦]/g, '') })}
+                    className={`font-mono ${data && form[f.key] !== read(data, f.key) ? 'border-waiting' : ''}`}
                   />
                 </Field>
               ))}
             </div>
           </Card>
         ))}
+      </div>
+      {data && (
+        <aside aria-label="What it changes" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
+          <Preview before={(k) => Number(read(data, k))} after={(k) => Number(form[k] ?? read(data, k))} />
+          {mayEdit && (
+            <div className="mt-4 space-y-2">
+              <Button variant="primary" size="lg" className="w-full" disabled={!changed.length || invalid} onClick={() => setConfirming(true)}>
+                {changed.length ? `Save ${changed.length} ${changed.length === 1 ? 'change' : 'changes'}` : 'Nothing changed yet'}
+              </Button>
+              {invalid && <p className="text-[12.5px] text-need">Check the numbers: none can be empty or below zero, and no percentage above 100.</p>}
+            </div>
+          )}
+        </aside>
+      )}
       </div>
       {data && (
         <ConfirmWithCode
@@ -103,5 +138,40 @@ export function Settings() {
         />
       )}
     </>
+  );
+}
+
+/** Before and after, on an order and a trip people actually make. */
+function Preview({ before, after }: { before: (k: string) => number; after: (k: string) => number }) {
+  const b = price(before);
+  const a = price(after);
+  const rows: [string, number, number][] = [
+    [`Buyer pays for ₦${SAMPLE_FOOD.toLocaleString('en-NG')} of food`, b.buyerPays, a.buyerPays],
+    ['The kitchen gets', b.vendorGets, a.vendorGets],
+    [`A ${SAMPLE_KM} km ride costs at least`, b.fare, a.fare],
+    ['The same ride, premium', b.premium, a.premium],
+    ['The rider gets', b.riderGets, a.riderGets],
+  ];
+  return (
+    <Card className="p-5">
+      <SectionTitle>What it changes</SectionTitle>
+      <ul className="space-y-3">
+        {rows.map(([label, x, y]) => (
+          <li key={label} className="text-[13.5px]">
+            <span className="block text-ink-2">{label}</span>
+            <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-mono">
+              {x === y ? (
+                <span className="text-[16px] font-semibold">{formatNaira(y)}</span>
+              ) : (
+                <>
+                  <span className="text-ink-3 line-through">{formatNaira(x)}</span>
+                  <span className="text-[16px] font-semibold text-waiting">{formatNaira(y)}</span>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

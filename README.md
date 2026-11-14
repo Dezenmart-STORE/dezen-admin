@@ -34,11 +34,13 @@ Production builds must set `VITE_USE_SAMPLE_DATA=false`.
 | Area | Pages |
 | --- | --- |
 | Home | Your shift: the one person to help next ("Take it"), the rest grouped by approve, pay, rule and review, the living mark (each shape grows with what its service owes; a red halo means someone is past our promise), and who was settled today |
-| DezenFoods | Orders (with full history), disputes, vendors |
-| DezenExpress | Trips (with refunds), rider withdrawals, riders (with wallet corrections), delivery companies |
-| Shopping | Orders, disputes (rulings wait for an owner), products (hide, show, sponsor), sellers |
-| Money | Payments, payment notices from the payment companies, daily balance check |
-| Dezenmart | People (masked, with a logged “show full details”), fees and fares, staff, activity log |
+| DezenFoods | Orders (with full history), disputes (split rulings), vendors (each a case with photos and checks) |
+| DezenExpress | Trips (with refunds), rider withdrawals (grouped by what unsticks each one), riders and delivery companies (cases with photos and checks), wallet corrections |
+| Shopping | Orders, disputes (rulings wait for an owner), products (open on Reported, with buyers' words), sellers. Amounts in naira, coin amount as small print |
+| Money | Payments, payment notices (problems first), daily balance check (gap first, a streak of matching days) |
+| Dezenmart | People (where they stand first; masked details with a logged “show full details”), fees and fares (with a live preview), staff (owners protected), activity log (names, every action) |
+
+**Every queue opens like Home:** a sentence about people and our promise ("2 riders have waited past our 2‑day promise to start earning"), the one person to take next, then the list, oldest first, with how long each has waited and who has it. The whole row opens the record.
 
 **Access:**
 - Each person sees only what their access covers. The backend is what enforces it.

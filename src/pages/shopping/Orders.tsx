@@ -44,7 +44,7 @@ export function ShopOrders() {
         mobile={(o) => ({
           title: <span className="font-mono">{o.orderRef}</span>,
           subtitle: `${o.quantity} × ${o.product.name}`,
-          amount: <Money amount={o.amount} currency={o.currency} />,
+          amount: <Money amount={o.amount} currency={o.currency} ngn={o.amountNgn} />,
           status: <Status status={o.status} />,
         })}
         columns={[
@@ -52,7 +52,7 @@ export function ShopOrders() {
           { header: 'Product', cell: (o) => `${o.quantity} × ${o.product.name}` },
           { header: 'Buyer', cell: (o) => o.buyer.name },
           { header: 'Seller', cell: (o) => o.seller.name },
-          { header: 'Amount', align: 'right', cell: (o) => <Money amount={o.amount} currency={o.currency} /> },
+          { header: 'Amount', align: 'right', cell: (o) => <Money amount={o.amount} currency={o.currency} ngn={o.amountNgn} /> },
           { header: 'Status', cell: (o) => <Status status={o.status} /> },
           { header: 'Placed', cell: (o) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(o.createdAt)}</span> },
         ]}
@@ -86,7 +86,7 @@ export function ShopOrderDetail() {
               rows={[
                 ['Buyer', <PersonLink id={o.buyer.id} name={o.buyer.name} />],
                 ['Seller', <PersonLink id={o.seller.id} name={o.seller.name} />],
-                ['Amount', <Money amount={o.amount} currency={o.currency} />],
+                ['Amount', <Money amount={o.amount} currency={o.currency} ngn={o.amountNgn} paidAs />],
                 ['Payment', o.held ? 'Held until the buyer confirms delivery' : 'Not held'],
                 ['Placed', formatDate(o.createdAt)],
               ]}

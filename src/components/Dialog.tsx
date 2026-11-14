@@ -92,6 +92,7 @@ export function MoneySheet({
   title,
   amount,
   currency = 'NGN',
+  ngn,
   recipient,
   consequence,
   irreversible = true,
@@ -107,6 +108,8 @@ export function MoneySheet({
   title: string;
   amount: number;
   currency?: string;
+  /** For coin amounts: the naira value fixed at payment. Staff read and type this; the coin amount is small print. */
+  ngn?: number;
   recipient: { name: string; detail?: string };
   consequence: ReactNode;
   irreversible?: boolean;
@@ -137,7 +140,9 @@ export function MoneySheet({
   }, [open]);
 
   const online = useOnline();
-  const amountOk = Number(typed.replace(/[,\s₦]/g, '')) === amount;
+  // Staff confirm the figure they read: the naira value when the money is in coins.
+  const shown = currency !== 'NGN' && typeof ngn === 'number' ? ngn : amount;
+  const amountOk = Number(typed.replace(/[,\s₦]/g, '')) === shown;
   const ready = amountOk && reason.trim().length > 2 && code.length === 6 && extraReady && online;
 
   const submit = async (e?: FormEvent) => {
@@ -177,7 +182,7 @@ export function MoneySheet({
           {done.state === 'awaiting_approval' ? <StatusShape shape="ring" tone="waiting" size={44} /> : <Settle size={44} />}
           <div>
             <p className="font-mono text-3xl font-semibold tracking-tight">
-              <Money amount={done.amount} currency={done.currency} />
+              <Money amount={done.amount} currency={done.currency} ngn={done.amountNgn ?? ngn} />
             </p>
             <p className="mt-1 text-[15px] text-ink-2">
               {done.state === 'sent' ? 'sent to' : done.state === 'awaiting_approval' ? 'for' : 'recorded for'} <span className="font-semibold text-ink">{done.recipient}</span>
@@ -217,8 +222,13 @@ export function MoneySheet({
       <form onSubmit={submit} className="space-y-5" autoComplete="off">
         <div>
           <p className="font-mono text-[40px] font-semibold leading-none tracking-tight">
-            <Money amount={amount} currency={currency} />
+            <Money amount={amount} currency={currency} ngn={ngn} />
           </p>
+          {currency !== 'NGN' && typeof ngn === 'number' && (
+            <p className="mt-1.5 text-[13px] text-ink-3">
+              Moves as {amount.toLocaleString('en-NG')} {currency}, the way it was paid.
+            </p>
+          )}
           <div className="mt-4 flex items-center gap-3">
             <span aria-hidden className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-raised text-[13px] font-semibold">
               {initials(recipient.name)}
@@ -237,7 +247,7 @@ export function MoneySheet({
         {!online && <ErrorNote>You're offline. Nothing can be sent until you're back; nothing is saved to send later.</ErrorNote>}
         <Field
           label="Type the amount to confirm"
-          hint={!typed ? `Type ${amount.toLocaleString('en-NG')} exactly, without the currency.` : amountOk ? 'Matches.' : 'That does not match the amount above.'}
+          hint={!typed ? `Type ${shown.toLocaleString('en-NG')} exactly, without the ₦ sign.` : amountOk ? 'Matches.' : 'That does not match the amount above.'}
         >
           <Input inputMode="decimal" value={typed} onChange={(e) => setTyped(e.target.value)} className="font-mono" />
         </Field>

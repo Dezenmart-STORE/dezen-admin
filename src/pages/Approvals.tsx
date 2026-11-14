@@ -8,7 +8,8 @@ import { useApprovalsQuery, useApproveMutation, useDeclineMutation, useSettingsQ
 import type { Approval } from '../store/types';
 import { ServiceGlyph, StatusShape } from '../components/brand';
 import { ConfirmDialog, MoneySheet } from '../components/Dialog';
-import { Button, Card, Empty, ErrorNote, Loading, Money, PageHeader, Pagination, Segments, Status } from '../components/ui';
+import { Button, Card, Empty, ErrorNote, Loading, Money, Pagination, Segments, Status } from '../components/ui';
+import { QueueTop } from '../components/NextCard';
 
 /**
  * The second approver. A money action above the threshold waits here; a different person approves
@@ -26,9 +27,13 @@ export function Approvals() {
 
   return (
     <>
-      <PageHeader
+      <QueueTop
+        queue="approvals"
         title="Approvals"
-        description={`Payments above ${settings ? `₦${settings.approvalThreshold.toLocaleString('en-NG')}` : 'the limit'} need a second person. Read what was asked and why, then approve or decline.`}
+        who={['payment', 'payments']}
+        waitFor="for a second approval"
+        description={`Payments above ${settings ? `₦${settings.approvalThreshold.toLocaleString('en-NG')}` : 'the limit'} need a second person. Read what happened before, then approve or decline.`}
+        clear={['Nothing is waiting for approval.', 'No payment above the limit is waiting on a second person.']}
       />
       <div className="mb-5">
         <Segments
@@ -65,15 +70,21 @@ export function Approvals() {
                       </p>
                       <p className="text-[17px] font-semibold">{a.summary}</p>
                       <p className="mt-1 text-[14px] text-ink-2">
-                        {mine ? 'You asked' : `${a.requestedBy} asked`}: “{a.reason}”
+                        {mine ? 'You asked' : `${a.requestedByName ?? a.requestedBy} asked`}: “{a.reason}”
                       </p>
+                      {a.before && a.status === 'pending' && (
+                        <p className="mt-3 max-w-[62ch] border-l-2 border-line pl-3 text-[13px] text-ink-2">
+                          <span className="mb-0.5 block font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">What happened before</span>
+                          {a.before}
+                        </p>
+                      )}
                       <Link to={a.link} className="mt-2 inline-block text-[13px] font-semibold underline-offset-4 hover:underline">
                         Open the record →
                       </Link>
                     </div>
                     <div className="flex flex-col items-end gap-3">
                       <span className="text-[24px]">
-                        <Money amount={a.amount} currency={a.currency} />
+                        <Money amount={a.amount} currency={a.currency} ngn={a.amountNgn} />
                       </span>
                       {a.status === 'pending' ? (
                         mine ? (
@@ -113,13 +124,15 @@ export function Approvals() {
       {approving && (
         <MoneySheet
           open={!!approving}
-          eyebrow={`Second approval · asked by ${approving.requestedBy}`}
+          eyebrow={`Second approval · asked by ${approving.requestedByName ?? approving.requestedBy}`}
           title="Approve this payment"
           amount={approving.amount}
           currency={approving.currency}
+          ngn={approving.amountNgn}
           recipient={{ name: approving.recipient }}
           consequence={
             <>
+              {approving.before && <span className="mb-2 block">{approving.before}</span>}
               {approving.summary}. They said: “{approving.reason}”. Approving sends it now.
             </>
           }
@@ -131,10 +144,10 @@ export function Approvals() {
       <ConfirmDialog
         open={!!declining}
         title="Decline this payment"
-        summary={declining ? `${declining.summary}. Nothing is sent, and ${declining.requestedBy} sees your reason.` : ''}
+        summary={declining ? `${declining.summary}. Nothing is sent, and ${declining.requestedByName ?? declining.requestedBy} sees your reason.` : ''}
         actionLabel="Decline"
         askReason
-        reasonHint={declining ? `${declining.requestedBy} sees this.` : undefined}
+        reasonHint={declining ? `${(declining.requestedByName ?? declining.requestedBy).split(' ')[0]} sees this.` : undefined}
         danger
         onClose={() => setDeclining(null)}
         onConfirm={async (reason) => failureOf(await decline({ id: declining!.id, reason: reason ?? '' }))}

@@ -10,6 +10,7 @@ import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
 import { RecordPage } from '../../components/RecordPage';
 import { MoneySheet } from '../../components/Dialog';
+import { ageWords, isLate } from '../../components/NextCard';
 import { PersonLink } from '../../components/PersonLink';
 import { WHO } from '../../components/Choice';
 import { ClaimBar, ClaimTag, useClaimedByOther } from '../../components/ClaimBar';
@@ -95,10 +96,18 @@ export function BookingDetail() {
       back="/express/bookings"
       backLabel="Trips"
       service="express"
-      kind={b ? (b.type === 'ride' ? 'Ride' : 'Delivery') : undefined}
+      kind={b ? `${b.type === 'ride' ? 'Ride' : 'Delivery'}${needsRefund(b) ? ` · ${b.bookingRef} · refund due` : ''}` : undefined}
       loading={isLoading}
       error={errorMessage(error)}
-      title={<span className="font-mono">{b?.bookingRef}</span>}
+      title={
+        b && needsRefund(b) ? (
+          <>
+            {b.customer.name} has waited <span className={isLate(b.createdAt, 24) ? 'text-need' : ''}>{ageWords(b.createdAt)}</span> for a refund
+          </>
+        ) : (
+          <span className="font-mono">{b?.bookingRef}</span>
+        )
+      }
       badge={b && <Status status={b.status} />}
       actions={action}
       timeline={b?.timeline}

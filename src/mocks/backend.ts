@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, QueueItem, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, QueueItem, QueueKey, QueueTop, ReviewCase, ReviewKind, Withdrawal, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -81,12 +81,13 @@ const receipt = (
   state: MoneyReceipt['state'],
   next?: MoneyReceipt['next'],
   currency = 'NGN',
+  amountNgn?: number,
 ): MoneyReceipt => {
   if (state === 'sent' || (state === 'recorded' && !recipient.includes('once an owner'))) {
     const who = recipient.split(' · ')[0].split(',')[0];
-    db.settled.unshift({ text: state === 'sent' ? `${who} was paid` : `${who} is settled`, amount, currency, by: EMAIL, at: now() });
+    db.settled.unshift({ text: state === 'sent' ? `${who} was paid` : `${who} is settled`, amount: amountNgn ?? amount, currency: amountNgn ? 'NGN' : currency, by: EMAIL, at: now() });
   }
-  return { reference: `DZ-${++refNo}`, amount, currency, recipient, state, at: now(), by: EMAIL, next };
+  return { reference: `DZ-${++refNo}`, amount, currency, amountNgn, recipient, state, at: now(), by: EMAIL, next };
 };
 /** The typed amount must match what will move. */
 const checkAmount = (req: Req, expected: number) => {
@@ -98,7 +99,15 @@ const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 const NAME = 'You';
 /** Refuse a money action on a record someone else is handling. */
+/** A claim lapses after 2 hours without activity, so a forgotten "I'm on it" never blocks the queue. */
+const CLAIM_LAPSE_MS = 2 * 3600_000;
+const lapseClaims = () => {
+  const t = Date.now();
+  for (const rec of [...db.foodOrders, ...db.bookings, ...db.withdrawals, ...db.shopDisputes] as { claim?: Claim | null }[])
+    if (rec.claim && t - new Date(rec.claim.activeAt ?? rec.claim.since).getTime() > CLAIM_LAPSE_MS) rec.claim = null;
+};
 const guardClaim = (rec: { claim?: Claim | null }) => {
+  if (rec.claim && rec.claim.by === EMAIL) rec.claim.activeAt = now();
   if (rec.claim && rec.claim.by !== EMAIL) {
     const since = new Date(rec.claim.since).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
     throw new Fail(409, `${rec.claim.name} is working on this since ${since}. Ask them, or take it over first.`);
@@ -169,22 +178,35 @@ const queues = (): QueueItem[] => {
   return items.filter((q) => r.services.includes('*') || r.services.includes(q.service));
 };
 
+/**
+ * People first (customers, riders, kitchens), then their orders, trips and payments, at most eight of
+ * each kind, so a common name never pushes the person out of the results.
+ */
 const search = (q: string): SearchResult[] => {
   if (q.trim().length < 2) return [];
-  const out: SearchResult[] = [];
-  for (const p of db.people) if (matches(q, p.name, p.email, p.phone, p.accountNumber)) out.push({ kind: 'person', service: 'platform', id: p.id, title: p.name, subtitle: `${p.emailMasked} · joined ${new Date(p.joinedAt).getFullYear()}`, link: `/people/${p.id}` });
-  for (const o of db.foodOrders) if (matches(q, o.orderRef, o.buyer.name, o.vendor.name)) out.push({ kind: 'order', service: 'food', id: o.id, title: o.orderRef, subtitle: `${o.vendor.name} · ${o.buyer.name}`, link: `/food/orders/${o.id}` });
-  for (const b of db.bookings) if (matches(q, b.bookingRef, b.customer.name, b.rider?.name)) out.push({ kind: 'booking', service: 'express', id: b.id, title: b.bookingRef, subtitle: `${b.pickup} → ${b.dropoff}`, link: `/express/bookings/${b.id}` });
-  for (const o of db.shopOrders) if (matches(q, o.orderRef, o.buyer.name, o.seller.name, o.product.name)) out.push({ kind: 'order', service: 'shopping', id: o.id, title: o.orderRef, subtitle: `${o.product.name} · ${o.buyer.name}`, link: `/shopping/orders/${o.id}` });
-  for (const p of db.payments) if (matches(q, p.reference)) out.push({ kind: 'payment', service: p.service, id: p.id, title: p.reference, subtitle: p.purpose, link: `/money/payments?q=${p.reference}` });
-  for (const v of db.vendors) if (matches(q, v.businessName)) out.push({ kind: 'vendor', service: 'food', id: v.id, title: v.businessName, subtitle: `${v.lga}, ${v.state}`, link: `/food/vendors?q=${encodeURIComponent(v.businessName)}` });
-  for (const r of db.riders) if (matches(q, r.name, r.plateNumber)) out.push({ kind: 'rider', service: 'express', id: r.id, title: r.name, subtitle: `${r.vehicleType} · ${r.plateNumber}`, link: `/express/riders?q=${encodeURIComponent(r.name)}` });
+  const people: SearchResult[] = [];
+  const things: SearchResult[] = [];
+  for (const p of db.people) if (matches(q, p.name, p.email, p.phone, p.accountNumber)) people.push({ kind: 'person', service: 'platform', id: p.id, title: p.name, subtitle: `Customer · ${p.emailMasked} · joined ${new Date(p.joinedAt).getFullYear()}`, link: `/people/${p.id}` });
+  for (const r of db.riders) if (matches(q, r.name, r.plateNumber, r.phone)) people.push({ kind: 'rider', service: 'express', id: r.id, title: r.name, subtitle: `Rider · ${r.vehicleType} · ${r.plateNumber}`, link: `/express/riders/${r.id}`, status: r.status });
+  for (const v of db.vendors) if (matches(q, v.businessName, v.ownerName)) people.push({ kind: 'vendor', service: 'food', id: v.id, title: v.businessName, subtitle: `Kitchen · ${v.ownerName} · ${v.lga}, ${v.state}`, link: `/food/vendors/${v.id}`, status: v.status });
+  for (const o of db.foodOrders) if (matches(q, o.orderRef, o.buyer.name, o.vendor.name)) things.push({ kind: 'order', service: 'food', id: o.id, title: o.orderRef, subtitle: `${o.vendor.name} · ${o.buyer.name}`, link: `/food/orders/${o.id}`, status: o.dispute && !o.dispute.resolved ? 'disputed' : o.status, amount: o.total });
+  for (const x of db.bookings) if (matches(q, x.bookingRef, x.customer.name, x.rider?.name)) things.push({ kind: 'booking', service: 'express', id: x.id, title: x.bookingRef, subtitle: `${x.customer.name} · ${x.pickup} → ${x.dropoff}`, link: `/express/bookings/${x.id}`, status: x.status === 'cancelled' && x.paymentStatus === 'paid' ? 'to_refund' : x.status, amount: x.fare });
+  for (const o of db.shopOrders) if (matches(q, o.orderRef, o.buyer.name, o.seller.name, o.product.name)) things.push({ kind: 'order', service: 'shopping', id: o.id, title: o.orderRef, subtitle: `${o.product.name} · ${o.buyer.name}`, link: `/shopping/orders/${o.id}`, status: o.status, amount: o.amountNgn });
+  for (const p of db.payments) if (matches(q, p.reference)) things.push({ kind: 'payment', service: p.service, id: p.id, title: p.reference, subtitle: p.purpose, link: `/money/payments?q=${p.reference}`, status: p.status, amount: p.amount });
   const r = role();
-  // Only what the person may open: People and payments need platform access.
+  // Only what the person may open: customers and payments need platform access.
   const mayOpen = (x: SearchResult) =>
     (r.services.includes('*') || r.services.includes(x.kind === 'person' || x.kind === 'payment' ? 'platform' : x.service)) &&
     r.capabilities.includes('support');
-  return out.filter(mayOpen).slice(0, 30);
+  const capped = (xs: SearchResult[]) => {
+    const seen = new Map<string, number>();
+    return xs.filter((x) => {
+      const n = (seen.get(x.kind) ?? 0) + 1;
+      seen.set(x.kind, n);
+      return n <= 8;
+    });
+  };
+  return capped([...people, ...things].filter(mayOpen));
 };
 
 // The seeded approval: approving it sends the 180,000 withdrawal again.
@@ -194,6 +216,92 @@ performers.set('ap1', () => {
   w.attempts += 1;
   return receipt(w.amount, `${w.rider.name} · ${w.bank} ${w.accountNumberMasked}`, 'sent');
 });
+
+/** A review queue lists whoever has waited longest first. */
+const oldestFirst = <T extends { createdAt: string }>(status: string | undefined, xs: T[]) => (status === 'pending' ? [...xs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : xs);
+
+// ── reviews ──────────────────────────────────────────────────────────────────
+
+const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+const reviewCase = (kind: ReviewKind, id: string): ReviewCase => {
+  if (kind === 'rider') {
+    const r = find(db.riders, id, 'Rider');
+    return {
+      kind, id, service: 'express', name: r.name, summary: `${r.vehicleType} · ${r.plateNumber}`, status: r.status, appliedAt: r.createdAt,
+      facts: [
+        { label: 'Phone', value: r.phone },
+        { label: 'Vehicle', value: r.vehicleType },
+        { label: 'Plate', value: r.plateNumber },
+        { label: 'Licence number', value: r.licenceNumber },
+        { label: 'Pays out to', value: r.payoutAccount ? `${r.payoutAccount.accountName} · ${r.payoutAccount.bankName} ${r.payoutAccount.accountNumberMasked}` : 'No account yet' },
+      ],
+      documents: [
+        { id: 'licence', label: "Driver's licence", caption: `Uploaded ${shortDay(r.createdAt)}` },
+        { id: 'plate', label: 'Vehicle with its plate', caption: r.plateNumber },
+        { id: 'face', label: 'Photo of the rider', caption: 'Taken in the app' },
+      ],
+      checks: [
+        { id: 'licence-name', label: 'Name on the licence matches', expected: r.name },
+        { id: 'licence-date', label: 'Licence is in date', expected: `Licence ${r.licenceNumber}` },
+        { id: 'plate', label: 'Plate in the photo matches', expected: r.plateNumber },
+        { id: 'face', label: 'Face matches the licence photo' },
+        ...(r.payoutAccount ? [{ id: 'payout-name', label: 'Payout account is in their name', expected: r.payoutAccount.accountName }] : []),
+      ],
+      rejectionReason: (r as { rejectionReason?: string }).rejectionReason,
+    };
+  }
+  if (kind === 'vendor') {
+    const v = find(db.vendors, id, 'Vendor');
+    return {
+      kind, id, service: 'food', name: v.businessName, summary: `${v.ownerName} · ${v.lga}, ${v.state}`, status: v.status, appliedAt: v.createdAt,
+      facts: [
+        { label: 'Owner', value: v.ownerName },
+        { label: 'Phone', value: v.phone },
+        { label: 'Address', value: v.address },
+        { label: 'Sells', value: v.categories.join(', ') },
+        { label: 'Pays out to', value: `${v.payoutAccount.accountName} · ${v.payoutAccount.bankName} ${v.payoutAccount.accountNumberMasked}` },
+      ],
+      documents: [
+        { id: 'kitchen', label: 'The kitchen', caption: v.address },
+        { id: 'owner-id', label: "Owner's ID", caption: v.ownerName },
+        { id: 'food', label: 'A dish they sell', caption: v.categories[0] },
+      ],
+      checks: [
+        { id: 'owner-id', label: 'ID matches the owner', expected: v.ownerName },
+        { id: 'kitchen', label: 'Kitchen photo is a real, clean kitchen' },
+        { id: 'address', label: 'Address is a real place we deliver to', expected: `${v.lga}, ${v.state}` },
+        { id: 'payout-name', label: 'Payout name matches the owner or the business', expected: v.payoutAccount.accountName },
+      ],
+      rejectionReason: v.rejectionReason,
+    };
+  }
+  const p = find(db.providers, id, 'Delivery company');
+  return {
+    kind, id, service: 'express', name: p.name, summary: `Covers ${p.coverage.join(', ')}`, status: p.status, appliedAt: p.createdAt,
+    facts: [
+      { label: 'Email', value: p.email },
+      { label: 'Phone', value: p.phone },
+      { label: 'Covers', value: p.coverage.join(', ') },
+    ],
+    documents: [
+      { id: 'cac', label: 'Business registration', caption: p.name },
+      { id: 'fleet', label: 'Their vehicles', caption: 'Photo of the fleet' },
+    ],
+    checks: [
+      { id: 'cac-name', label: 'Registered name matches', expected: p.name },
+      { id: 'contact', label: 'Called the number and someone answered', expected: p.phone },
+      { id: 'coverage', label: 'They really deliver in those states', expected: p.coverage.join(', ') },
+    ],
+    rejectionReason: (p as { rejectionReason?: string }).rejectionReason,
+  };
+};
+/** Approve only with every check ticked; the ticks are saved with the decision. */
+const checksDone = (req: Req, kind: ReviewKind, id: string) => {
+  const need = reviewCase(kind, id).checks.map((c) => c.id);
+  const got = new Set((req.body.checks as string[] | undefined) ?? []);
+  const missing = need.filter((c) => !got.has(c));
+  if (missing.length) throw new Fail(422, `Tick every check before approving (${missing.length} left)`);
+};
 
 // ── home ─────────────────────────────────────────────────────────────────────
 
@@ -215,6 +323,104 @@ const claimers = (items: { claim?: Claim | null }[]) => {
   return [...out].map(([name, count]) => ({ name, count }));
 };
 
+type Cand = HomeNext & { verb: keyof typeof PROMISE_H; rank: number; claimedByOther: boolean; queue: QueueKey };
+
+/** Every individual thing waiting on staff that this person's access covers, each with its own age. */
+const candidates = (): Cand[] => {
+  const r = role();
+  const covers = (svc: Service) => r.services.includes('*') || r.services.includes(svc);
+  const can = (cap: Capability, svc: Service) => r.capabilities.includes(cap) && covers(svc);
+  const awaiting = (id: string) => db.approvals.some((a) => a.status === 'pending' && a.target.id === id);
+  const cands: Cand[] = [];
+
+  const approvals = db.approvals.filter((a) => a.status === 'pending' && a.requestedBy !== EMAIL && can('move_money', a.service));
+  for (const a of approvals)
+    cands.push({ verb: 'approve', rank: 0, claimedByOther: false, queue: 'approvals', kind: 'Second approval', service: a.service, title: `${(db.staff.find((x) => x.email === a.requestedBy)?.name ?? a.requestedBy).split(' ')[0]} needs your second approval for ${naira(a.amount)}`, why: `${a.summary}. They said: “${a.reason}”.`, amount: a.amount, waitingSince: a.requestedAt, link: '/approvals' });
+
+  const stuck = db.withdrawals.filter((w) => (w.status === 'failed' || w.status === 'manual') && !awaiting(w.id));
+  if (covers('express'))
+    for (const w of stuck)
+      cands.push({ verb: 'pay', rank: w.status === 'failed' && /name does not match|invalid account|account not found|insufficient balance/i.test(w.lastError ?? '') && !w.bankDetailsUpdatedAt ? 1.5 : 1, claimedByOther: !!w.claim && w.claim.by !== EMAIL, yours: w.claim?.by === EMAIL, queue: 'withdrawals', kind: 'Rider withdrawal', service: 'express', title: `${w.rider.name} has waited ${ageWords(w.requestedAt)} for ${naira(w.amount)}`, why: w.status !== 'failed' ? 'No checked bank account: send it from the bank, then record it here.' : /name does not match|invalid account|account not found/i.test(w.lastError ?? '') ? `The bank said: ${w.lastError}. Sending again will fail too, so ask them to fix their bank details in the app.` : /insufficient balance/i.test(w.lastError ?? '') ? 'Our payout wallet ran short. Top it up, then send again; the same payment reference is reused.' : `The bank turned it back: ${w.lastError}. Sending again is safe; the same payment reference is reused.`, amount: w.amount, waitingSince: w.requestedAt, link: '/express/withdrawals?status=stuck', claim: { kind: 'withdrawal', id: w.id } });
+
+  const refunds = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
+  if (covers('express'))
+    for (const b of refunds)
+      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!b.claim && b.claim.by !== EMAIL, yours: b.claim?.by === EMAIL, queue: 'refunds', kind: 'Refund due', service: 'express', title: `${b.customer.name} has waited ${ageWords(b.createdAt)} for a ${naira(b.fare)} refund`, why: 'They paid for a trip that was cancelled. The full fare goes back to the account they paid from.', amount: b.fare, waitingSince: b.createdAt, link: `/express/bookings/${b.id}`, claim: { kind: 'booking', id: b.id } });
+
+  const failedFood = db.foodOrders.filter((o) => o.payout?.status === 'failed' || o.refund?.status === 'failed');
+  if (covers('food'))
+    for (const o of failedFood) {
+      const refund = o.refund?.status === 'failed';
+      const m = refund ? o.refund! : o.payout!;
+      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, queue: 'food-money', kind: refund ? 'Buyer refund' : 'Vendor payout', service: 'food', title: `${refund ? o.buyer.name : o.vendor.name} has waited ${ageWords(o.createdAt)} for ${naira(m.amount)}`, why: `The bank said: ${m.lastError}. Tried ${m.attempts} times; sending again reuses the same reference.`, amount: m.amount, waitingSince: o.createdAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
+    }
+
+  const foodDisputes = db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved);
+  if (covers('food'))
+    for (const o of foodDisputes)
+      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, queue: 'food-disputes', kind: 'Dispute', service: 'food', title: `${o.buyer.name} is waiting for a ruling on ${o.orderRef}`, why: `“${o.dispute!.reason}” · ${naira(o.total)} at stake between them and ${o.vendor.name}.`, amount: o.total, waitingSince: o.dispute!.openedAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
+
+  const shopDisputes = db.shopDisputes.filter((d) => !d.ruling);
+  if (covers('shopping'))
+    for (const d of shopDisputes)
+      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!d.claim && d.claim.by !== EMAIL, yours: d.claim?.by === EMAIL, queue: 'shop-disputes', kind: 'Dispute', service: 'shopping', title: `${d.order.buyer.name} and ${d.order.seller.name} are waiting for a ruling`, why: `“${d.reason}” · ₦${d.order.amountNgn.toLocaleString('en-NG')} on ${d.order.orderRef}.`, waitingSince: d.openedAt, link: '/shopping/disputes', claim: { kind: 'shop-dispute', id: d.id } });
+
+  const riders = byStatus(db.riders, 'pending');
+  if (covers('express'))
+    for (const x of riders)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'riders', kind: 'Rider to review', service: 'express', title: `${x.name} can't drive until someone checks their licence`, why: `${x.vehicleType} · plate ${x.plateNumber} · licence ${x.licenceNumber}.`, waitingSince: x.createdAt, link: `/express/riders/${x.id}` });
+  const vendors = byStatus(db.vendors, 'pending');
+  if (covers('food'))
+    for (const v of vendors)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'vendors', kind: 'Kitchen to review', service: 'food', title: `${v.businessName} is ready to sell`, why: `Check the address (${v.lga}, ${v.state}) and that the payout name matches ${v.ownerName}.`, waitingSince: v.createdAt, link: `/food/vendors/${v.id}` });
+
+  const providers = byStatus(db.providers, 'pending');
+  if (covers('express'))
+    for (const x of providers)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'providers', kind: 'Delivery company to review', service: 'express', title: `${x.name} wants to deliver for Dezen`, why: `Check their registration and that they really cover ${x.coverage.join(', ')}.`, waitingSince: x.createdAt, link: `/express/providers/${x.id}` });
+  const reported = db.products.filter((p) => p.reports > 0 && p.visible);
+  if (covers('shopping'))
+    for (const x of reported)
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'products', kind: 'Reported product', service: 'shopping', title: `${s(x.reports, 'buyer reported', 'buyers reported')} ${x.name}`, why: `Sold by ${x.seller.name}. Read what they said, then hide it or keep it.`, waitingSince: x.createdAt, link: '/shopping/products?status=reported' });
+  return cands;
+};
+
+const RANK_LATE = (c: Cand) => hoursSince(c.waitingSince) > PROMISE_H[c.verb];
+const canDoFor = (c: Cand) => {
+  const r = role();
+  const covers = r.services.includes('*') || r.services.includes(c.service);
+  return covers && r.capabilities.includes(c.verb === 'review' ? 'verify' : 'move_money');
+};
+
+/** The top of one queue page: counts against our promise and the one person to take next. */
+const queueTop = (key: QueueKey): QueueTop => {
+  const items = candidates().filter((c) => c.queue === key);
+  const verb = items[0]?.verb ?? ({ approvals: 'approve', withdrawals: 'pay', refunds: 'pay', 'food-money': 'pay', 'food-disputes': 'rule', 'shop-disputes': 'rule' } as Record<string, keyof typeof PROMISE_H>)[key] ?? 'review';
+  const mine = items.find((c) => c.yours);
+  // Something this person can finish now comes first; within that, whoever has waited longest.
+  const pick = mine ?? [...items].filter((c) => canDoFor(c) && !c.claimedByOther).sort((a, b) => a.rank - b.rank || a.waitingSince.localeCompare(b.waitingSince))[0];
+  const claimed = new Map<string, number>();
+  for (const c of items) if (c.claimedByOther) {
+    const rec = c.claim ? claimable(c.claim.kind, c.claim.id).rec : null;
+    if (rec?.claim) claimed.set(rec.claim.name, (claimed.get(rec.claim.name) ?? 0) + 1);
+  }
+  const strip = (c?: Cand): HomeNext | null => {
+    if (!c) return null;
+    const { verb, rank: _r, claimedByOther: _c, queue: _q, ...n } = c;
+    return { ...n, promiseHours: PROMISE_H[verb] };
+  };
+  return {
+    key,
+    promiseHours: PROMISE_H[verb],
+    waitingPeople: items.length,
+    latePeople: items.filter(RANK_LATE).length,
+    oldestAt: [...items.map((c) => c.waitingSince)].sort()[0],
+    claimedBy: [...claimed].map(([name, count]) => ({ name, count })),
+    canAct: items.length ? items.some(canDoFor) : true,
+    next: strip(pick),
+  };
+};
+
 const home = (): HomeData => {
   const r = role();
   const covers = (svc: Service) => r.services.includes('*') || r.services.includes(svc);
@@ -222,50 +428,15 @@ const home = (): HomeData => {
   const oldestOf = (dates: string[]) => [...dates].sort()[0];
   const awaiting = (id: string) => db.approvals.some((a) => a.status === 'pending' && a.target.id === id);
 
-  // The individual things waiting, each with its own age (for "next" and the counts).
-  type Cand = HomeNext & { verb: keyof typeof PROMISE_H; rank: number; claimedByOther: boolean };
-  const cands: Cand[] = [];
-
+  const cands = candidates();
   const approvals = db.approvals.filter((a) => a.status === 'pending' && a.requestedBy !== EMAIL && can('move_money', a.service));
-  for (const a of approvals)
-    cands.push({ verb: 'approve', rank: 0, claimedByOther: false, kind: 'Second approval', service: a.service, title: `${a.requestedBy.split('@')[0].replace(/^./, (c) => c.toUpperCase())} needs your second approval for ${naira(a.amount)}`, why: `${a.summary}. They said: “${a.reason}”.`, amount: a.amount, waitingSince: a.requestedAt, link: '/approvals' });
-
   const stuck = db.withdrawals.filter((w) => (w.status === 'failed' || w.status === 'manual') && !awaiting(w.id));
-  if (covers('express'))
-    for (const w of stuck)
-      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!w.claim && w.claim.by !== EMAIL, yours: w.claim?.by === EMAIL, kind: 'Rider withdrawal', service: 'express', title: `${w.rider.name} has waited ${ageWords(w.requestedAt)} for ${naira(w.amount)}`, why: w.status === 'failed' ? `The bank turned it back: ${w.lastError}. Sending again is safe; the same payment reference is reused.` : 'No checked bank account: send it from the bank, then record it here.', amount: w.amount, waitingSince: w.requestedAt, link: '/express/withdrawals?status=stuck', claim: { kind: 'withdrawal', id: w.id } });
-
   const refunds = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
-  if (covers('express'))
-    for (const b of refunds)
-      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!b.claim && b.claim.by !== EMAIL, yours: b.claim?.by === EMAIL, kind: 'Refund due', service: 'express', title: `${b.customer.name} has waited ${ageWords(b.createdAt)} for a ${naira(b.fare)} refund`, why: 'They paid for a trip that was cancelled. The full fare goes back to the account they paid from.', amount: b.fare, waitingSince: b.createdAt, link: `/express/bookings/${b.id}`, claim: { kind: 'booking', id: b.id } });
-
   const failedFood = db.foodOrders.filter((o) => o.payout?.status === 'failed' || o.refund?.status === 'failed');
-  if (covers('food'))
-    for (const o of failedFood) {
-      const refund = o.refund?.status === 'failed';
-      const m = refund ? o.refund! : o.payout!;
-      cands.push({ verb: 'pay', rank: 1, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, kind: refund ? 'Buyer refund' : 'Vendor payout', service: 'food', title: `${refund ? o.buyer.name : o.vendor.name} has waited ${ageWords(o.createdAt)} for ${naira(m.amount)}`, why: `The bank said: ${m.lastError}. Tried ${m.attempts} times; sending again reuses the same reference.`, amount: m.amount, waitingSince: o.createdAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
-    }
-
   const foodDisputes = db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved);
-  if (covers('food'))
-    for (const o of foodDisputes)
-      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!o.claim && o.claim.by !== EMAIL, yours: o.claim?.by === EMAIL, kind: 'Dispute', service: 'food', title: `${o.buyer.name} is waiting for a ruling on ${o.orderRef}`, why: `“${o.dispute!.reason}” · ${naira(o.total)} at stake between them and ${o.vendor.name}.`, amount: o.total, waitingSince: o.dispute!.openedAt, link: `/food/orders/${o.id}`, claim: { kind: 'food-order', id: o.id } });
-
   const shopDisputes = db.shopDisputes.filter((d) => !d.ruling);
-  if (covers('shopping'))
-    for (const d of shopDisputes)
-      cands.push({ verb: 'rule', rank: 2, claimedByOther: !!d.claim && d.claim.by !== EMAIL, yours: d.claim?.by === EMAIL, kind: 'Dispute', service: 'shopping', title: `${d.order.buyer.name} and ${d.order.seller.name} are waiting for a ruling`, why: `“${d.reason}” · ${d.order.amount} ${d.order.currency} on ${d.order.orderRef}.`, waitingSince: d.openedAt, link: '/shopping/disputes', claim: { kind: 'shop-dispute', id: d.id } });
-
   const riders = byStatus(db.riders, 'pending');
-  if (covers('express'))
-    for (const x of riders)
-      cands.push({ verb: 'review', rank: 3, claimedByOther: false, kind: 'Rider to review', service: 'express', title: `${x.name} can't drive until someone checks their licence`, why: `${x.vehicleType} · plate ${x.plateNumber} · licence ${x.licenceNumber}.`, waitingSince: x.createdAt, link: '/express/riders?status=pending' });
   const vendors = byStatus(db.vendors, 'pending');
-  if (covers('food'))
-    for (const v of vendors)
-      cands.push({ verb: 'review', rank: 3, claimedByOther: false, kind: 'Kitchen to review', service: 'food', title: `${v.businessName} is ready to sell`, why: `Check the address (${v.lga}, ${v.state}) and that the payout name matches ${v.ownerName}.`, waitingSince: v.createdAt, link: '/food/vendors?status=pending' });
 
   const late = (c: Cand) => hoursSince(c.waitingSince) > PROMISE_H[c.verb];
   const canDo = (c: Cand) => (c.verb === 'review' ? can('verify', c.service) : can('move_money', c.service));
@@ -340,7 +511,7 @@ const home = (): HomeData => {
     latePeople: cands.filter(late).length,
     waitingPeople: cands.length,
     oldestAt: oldestOf(cands.map((c) => c.waitingSince)),
-    next: next ? (({ verb: _v, rank: _r, claimedByOther: _c, ...n }) => n)(next) : null,
+    next: next ? (({ verb, rank: _r, claimedByOther: _c, queue: _q, ...n }) => ({ ...n, promiseHours: PROMISE_H[verb] }))(next) : null,
     groups,
     today: { mine: tally(today.filter((x) => x.by === EMAIL)), team: tally(today), settled: today.slice(0, 6), week },
     services,
@@ -397,7 +568,17 @@ const routes: Route[] = [
     handle: ({ params }) => {
       const r = role();
       const mine = db.approvals.filter((a) => r.capabilities.includes('move_money') && (r.services.includes('*') || r.services.includes(a.service)));
-      return ok(page(params.status ? mine.filter((a) => a.status === params.status) : mine, params));
+      const day = (iso: string) => new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+      const before = (a: Approval) => {
+        if (a.target.kind !== 'withdrawal') return undefined;
+        const w = db.withdrawals.find((x) => x.id === a.target.id);
+        if (!w || !w.lastError) return undefined;
+        const fixed = w.bankDetailsUpdatedAt ? ` ${w.rider.name} changed their bank details on ${day(w.bankDetailsUpdatedAt)}.` : '';
+        return `Tried ${w.attempts} times since ${day(w.requestedAt)}, to ${w.bank} ${w.accountNumberMasked}. The bank said: ${w.lastError}.${fixed}`;
+      };
+      const name = (email: string) => db.staff.find((x) => x.email === email)?.name ?? email;
+      const rows = (params.status ? mine.filter((a) => a.status === params.status) : mine).map((a) => ({ ...a, before: before(a), requestedByName: name(a.requestedBy) }));
+      return ok(page(rows, params));
     },
   },
   {
@@ -440,16 +621,18 @@ const routes: Route[] = [
   },
 
   // home
+  { method: 'GET', path: /^\/admin\/queue\/([a-z-]+)$/, handle: ({ match }) => ok(queueTop(match[1] as QueueKey)) },
   { method: 'GET', path: /^\/admin\/home$/, handle: () => ok(home()) },
   { method: 'GET', path: /^\/admin\/queues$/, handle: () => ok(queues()) },
   { method: 'GET', path: /^\/admin\/search$/, handle: (req) => ok(search(req.params.q ?? '')) },
 
+  { method: 'GET', path: /^\/admin\/reviews\/(vendor|rider|provider)\/([^/]+)$/, handle: ({ match }) => ok(reviewCase(match[1] as ReviewKind, match[2])) },
   // DezenFoods
   {
     method: 'GET',
     path: /^\/admin\/food\/vendors$/,
     needs: ['support', 'food'],
-    handle: ({ params }) => ok(page(byStatus(db.vendors, params.status).filter((v) => matches(params.q, v.businessName, v.ownerName)), params)),
+    handle: ({ params }) => ok(page(oldestFirst(params.status, byStatus(db.vendors, params.status).filter((v) => matches(params.q, v.businessName, v.ownerName))), params)),
   },
   {
     method: 'POST',
@@ -459,6 +642,7 @@ const routes: Route[] = [
     handle: (req) => {
       const v = find(db.vendors, req.match[1], 'Vendor');
       const status = req.body.status as typeof v.status;
+      if (status === 'approved' && v.status === 'pending') checksDone(req, 'vendor', v.id);
       if (status !== 'approved') v.rejectionReason = needReason(req);
       v.status = status;
       if (status === 'approved') db.settled.unshift({ text: `${v.businessName} can sell now`, by: EMAIL, at: now() });
@@ -519,19 +703,34 @@ const routes: Route[] = [
     method: 'GET',
     path: /^\/admin\/food\/disputes$/,
     needs: ['support', 'food'],
-    handle: ({ params }) => ok(page(db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved), params)),
+    handle: ({ params }) => ok(page(db.foodOrders.filter((o) => o.dispute && !o.dispute.resolved).sort((a, b) => a.dispute!.openedAt.localeCompare(b.dispute!.openedAt)), params)),
   },
   {
     method: 'POST',
     path: /^\/admin\/food\/disputes\/([^/]+)\/resolve$/,
     needs: ['move_money', 'food'],
     code: true,
-    log: (r) => `Ruled "${r.body.resolution === 'refund_buyer' ? 'refund buyer' : 'pay vendor'}" on ${db.foodOrders.find((o) => o.id === r.match[1])?.orderRef}`,
+    log: (r) => `Ruled "${r.body.resolution === 'refund_buyer' ? 'refund buyer' : r.body.resolution === 'split' ? `split: ₦${Number(r.body.amount).toLocaleString('en-NG')} back to the buyer, ₦${Number(r.body.vendorAmount).toLocaleString('en-NG')} to the vendor` : 'pay vendor'}" on ${db.foodOrders.find((o) => o.id === r.match[1])?.orderRef}`,
     handle: (req) => {
       const o = find(db.foodOrders, req.match[1], 'Order');
       if (!o.dispute || o.dispute.resolved) throw new Fail(409, 'This dispute is already settled');
       guardClaim(o);
       needReason(req);
+      if (req.body.resolution === 'split') {
+        // The food price is shared: part back to the buyer, the rest to the vendor. Fees are kept.
+        const back = Number(req.body.amount);
+        const toVendor = Number(req.body.vendorAmount);
+        if (!(back > 0 && toVendor > 0) || back + toVendor !== o.subtotal) throw new Fail(422, `The two parts must add up to the food price, ₦${o.subtotal.toLocaleString('en-NG')}`);
+        return gate(req, { service: 'food', summary: `Split ${o.orderRef}: ₦${back.toLocaleString('en-NG')} back to ${o.buyer.name}, ₦${toVendor.toLocaleString('en-NG')} to ${o.vendor.name}`, amount: back, recipient: o.buyer.name, link: `/food/orders/${o.id}`, target: { kind: 'food-order', id: o.id } }, () => {
+          o.dispute!.resolved = true;
+          o.status = 'completed';
+          o.refund = { status: 'processing', amount: back, attempts: 1 };
+          o.payout = { status: 'processing', amount: toVendor, attempts: 1 };
+          addNote(o.id, `Ruled: split. ₦${back.toLocaleString('en-NG')} back to ${o.buyer.name}, ₦${toVendor.toLocaleString('en-NG')} to ${o.vendor.name}`);
+          const next = db.foodOrders.find((x) => x.id !== o.id && x.dispute && !x.dispute.resolved);
+          return receipt(back, `${o.buyer.name} · and ₦${toVendor.toLocaleString('en-NG')} to ${o.vendor.name}`, 'sent', next && { label: `Next dispute: ${next.orderRef}`, link: `/food/orders/${next.id}` });
+        });
+      }
       const refund = req.body.resolution === 'refund_buyer';
       const amount = refund ? o.total : o.subtotal;
       checkAmount(req, amount);
@@ -557,7 +756,7 @@ const routes: Route[] = [
     method: 'GET',
     path: /^\/admin\/express\/riders$/,
     needs: ['support', 'express'],
-    handle: ({ params }) => ok(page(byStatus(db.riders, params.status).filter((r) => matches(params.q, r.name, r.plateNumber)), params)),
+    handle: ({ params }) => ok(page(oldestFirst(params.status, byStatus(db.riders, params.status).filter((r) => matches(params.q, r.name, r.plateNumber))), params)),
   },
   {
     method: 'PATCH',
@@ -566,7 +765,8 @@ const routes: Route[] = [
     log: (r) => `${r.body.status === 'verified' ? 'Approved' : 'Rejected'} rider ${db.riders.find((x) => x.id === r.match[1])?.name}`,
     handle: (req) => {
       const r = find(db.riders, req.match[1], 'Rider');
-      if (req.body.status === 'rejected') needReason(req);
+      if (req.body.status === 'verified') checksDone(req, 'rider', r.id);
+      if (req.body.status === 'rejected') (r as { rejectionReason?: string }).rejectionReason = needReason(req);
       r.status = req.body.status as typeof r.status;
       if (r.status === 'verified') db.settled.unshift({ text: `${r.name} can drive now`, by: EMAIL, at: now() });
       return ok(r);
@@ -644,7 +844,30 @@ const routes: Route[] = [
     handle: ({ params }) => {
       const xs = params.status === 'stuck' ? db.withdrawals.filter((w) => w.status === 'failed' || w.status === 'manual') : byStatus(db.withdrawals, params.status);
       const pending = (id: string) => db.approvals.some((a) => a.status === 'pending' && a.target.id === id);
-      return ok(page(xs.filter((w) => matches(params.q, w.rider.name)).map((w) => ({ ...w, awaitingApproval: pending(w.id) })), params));
+      const step = (w: Withdrawal): Withdrawal['nextStep'] =>
+        pending(w.id) ? 'awaiting_approval'
+        : w.status === 'manual' ? 'pay_by_hand'
+        : w.status !== 'failed' ? undefined
+        : /name does not match|invalid account|account not found/i.test(w.lastError ?? '') && !w.bankDetailsUpdatedAt ? (w.riderAskedAt ? 'rider_asked' : 'rider_fixes_bank')
+        : /insufficient balance/i.test(w.lastError ?? '') ? 'top_up_wallet'
+        : 'send_again';
+      const ORDER = ['send_again', 'pay_by_hand', 'rider_fixes_bank', 'top_up_wallet', 'rider_asked', 'awaiting_approval'];
+      const rows = xs
+        .filter((w) => matches(params.q, w.rider.name))
+        .map((w) => ({ ...w, awaitingApproval: pending(w.id), nextStep: step(w), lastAttemptAt: w.lastAttemptAt ?? (w.status === 'failed' ? new Date(new Date(w.requestedAt).getTime() + 3_600_000).toISOString() : undefined) }))
+        .sort((a, b) => (params.status === 'stuck' ? ORDER.indexOf(a.nextStep ?? '') - ORDER.indexOf(b.nextStep ?? '') : 0) || a.requestedAt.localeCompare(b.requestedAt));
+      return ok(page(rows, params));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/express\/withdrawals\/([^/]+)\/ask-rider$/,
+    needs: ['support', 'express'],
+    log: (r) => `Asked ${db.withdrawals.find((w) => w.id === r.match[1])?.rider.name} to fix their bank details`,
+    handle: (req) => {
+      const w = find(db.withdrawals, req.match[1], 'Withdrawal');
+      w.riderAskedAt = now();
+      return ok({ asked: true });
     },
   },
   {
@@ -656,6 +879,7 @@ const routes: Route[] = [
     handle: (req) => {
       const w = find(db.withdrawals, req.match[1], 'Withdrawal');
       if (w.status !== 'failed') throw new Fail(409, 'Only a failed withdrawal can be sent again');
+      if (/name does not match|invalid account|account not found/i.test(w.lastError ?? '') && !w.bankDetailsUpdatedAt) throw new Fail(409, 'The bank will refuse this again: the rider must fix their bank details first');
       guardClaim(w);
       checkAmount(req, w.amount);
       if (db.approvals.some((a) => a.status === 'pending' && a.target.id === w.id)) {
@@ -693,7 +917,7 @@ const routes: Route[] = [
     method: 'GET',
     path: /^\/admin\/express\/providers$/,
     needs: ['support', 'express'],
-    handle: ({ params }) => ok(page(byStatus(db.providers, params.status), params)),
+    handle: ({ params }) => ok(page(oldestFirst(params.status, byStatus(db.providers, params.status)), params)),
   },
   {
     method: 'PATCH',
@@ -702,7 +926,8 @@ const routes: Route[] = [
     log: (r) => `${r.body.status === 'verified' ? 'Approved' : 'Rejected'} delivery company ${db.providers.find((p) => p.id === r.match[1])?.name}`,
     handle: (req) => {
       const p = find(db.providers, req.match[1], 'Delivery company');
-      if (req.body.status === 'rejected') needReason(req);
+      if (req.body.status === 'verified') checksDone(req, 'provider', p.id);
+      if (req.body.status === 'rejected') (p as { rejectionReason?: string }).rejectionReason = needReason(req);
       p.status = req.body.status as typeof p.status;
       return ok(p);
     },
@@ -723,7 +948,7 @@ const routes: Route[] = [
       const o = find(db.shopOrders, match[1], 'Order');
       const steps: [string, TimelineEntry['kind'], string?][] = [
         [`${o.buyer.name} ordered ${o.quantity} × ${o.product.name}`, 'status'],
-        [`${o.buyer.name} paid ${o.amount} ${o.currency}; held until delivery is confirmed`, 'payment'],
+        [`${o.buyer.name} paid ₦${o.amountNgn.toLocaleString('en-NG')} (${o.amount} ${o.currency}); held until delivery is confirmed`, 'payment'],
       ];
       if (['shipped', 'delivered', 'completed', 'disputed'].includes(o.status)) steps.push([`${o.seller.name} shipped it`, 'status']);
       if (o.status === 'completed') steps.push(['Buyer confirmed delivery; seller paid', 'payment']);
@@ -735,7 +960,8 @@ const routes: Route[] = [
     method: 'GET',
     path: /^\/admin\/shopping\/disputes$/,
     needs: ['support', 'shopping'],
-    handle: ({ params }) => ok(page(db.shopDisputes, params)),
+    // Open ones first, oldest at the top; rulings waiting on an owner after them.
+    handle: ({ params }) => ok(page([...db.shopDisputes].sort((a, b) => Number(!!a.ruling) - Number(!!b.ruling) || a.openedAt.localeCompare(b.openedAt)), params)),
   },
   {
     method: 'POST',
@@ -750,7 +976,7 @@ const routes: Route[] = [
       checkAmount(req, d.order.amount);
       d.ruling = { resolution: req.body.resolution as 'refund_buyer' | 'release_to_seller', by: EMAIL, at: now(), note: needReason(req), carriedOut: false };
       const who = d.ruling.resolution === 'refund_buyer' ? d.order.buyer.name : d.order.seller.name;
-      return ok(receipt(d.order.amount, `${who}, once an owner carries it out`, 'recorded', undefined, d.order.currency));
+      return ok(receipt(d.order.amount, `${who}, once an owner carries it out`, 'recorded', undefined, d.order.currency, d.order.amountNgn));
     },
   },
   {
@@ -813,10 +1039,22 @@ const routes: Route[] = [
       const activity = [
         ...db.foodOrders.filter((o) => o.buyer.id === p.id).map((o) => ({ service: 'food' as const, kind: 'order' as const, ref: o.orderRef, status: o.status, amount: o.total, currency: 'NGN', at: o.createdAt, link: `/food/orders/${o.id}` })),
         ...db.bookings.filter((b) => b.customer.id === p.id).map((b) => ({ service: 'express' as const, kind: 'booking' as const, ref: b.bookingRef, status: b.status, amount: b.fare, currency: 'NGN', at: b.createdAt, link: `/express/bookings/${b.id}` })),
-        ...db.shopOrders.filter((o) => o.buyer.id === p.id).map((o) => ({ service: 'shopping' as const, kind: 'order' as const, ref: o.orderRef, status: o.status, amount: o.amount, currency: o.currency, at: o.createdAt, link: `/shopping/orders/${o.id}` })),
+        ...db.shopOrders.filter((o) => o.buyer.id === p.id).map((o) => ({ service: 'shopping' as const, kind: 'order' as const, ref: o.orderRef, status: o.status, amount: o.amountNgn, currency: 'NGN', at: o.createdAt, link: `/shopping/orders/${o.id}` })),
       ].sort((a, b) => b.at.localeCompare(a.at));
       const refs = new Set(activity.map((a) => a.ref));
-      return ok({ ...summary, activity, payments: db.payments.filter((x) => [...refs].some((r) => x.purpose.includes(r))) });
+      const owedToThem = [
+        ...db.bookings.filter((b) => b.customer.id === p.id && b.status === 'cancelled' && b.paymentStatus === 'paid').map((b) => ({ text: `Trip refund for ${b.bookingRef}`, amount: b.fare, since: b.createdAt, link: `/express/bookings/${b.id}` })),
+        ...db.foodOrders.filter((o) => o.buyer.id === p.id && o.refund?.status === 'failed').map((o) => ({ text: `Food refund for ${o.orderRef} didn't go through`, amount: o.refund!.amount, since: o.createdAt, link: `/food/orders/${o.id}` })),
+      ];
+      const openCases = [
+        ...db.foodOrders.filter((o) => o.buyer.id === p.id && o.dispute && !o.dispute.resolved).map((o) => ({ text: `Dispute on ${o.orderRef}: “${o.dispute!.reason}”`, since: o.dispute!.openedAt, link: `/food/orders/${o.id}` })),
+        ...db.shopDisputes.filter((d) => d.order.buyer.id === p.id && !d.ruling).map((d) => ({ text: `Dispute on ${d.order.orderRef}: “${d.reason}”`, since: d.openedAt, link: '/shopping/disputes' })),
+      ];
+      const ninety = Date.now() - 90 * 24 * HOUR;
+      const disputes90d =
+        db.foodOrders.filter((o) => o.buyer.id === p.id && o.dispute && new Date(o.dispute.openedAt).getTime() > ninety).length +
+        db.shopDisputes.filter((d) => d.order.buyer.id === p.id && new Date(d.openedAt).getTime() > ninety).length;
+      return ok({ ...summary, activity, payments: db.payments.filter((x) => [...refs].some((r) => x.purpose.includes(r))), standing: { owedToThem, openCases, disputes90d, orders: activity.length } });
     },
   },
   {
@@ -898,6 +1136,7 @@ const routes: Route[] = [
     handle: ({ match }) => {
       const s = find(db.staff, match[1], 'Staff member');
       if (s.email === EMAIL) throw new Fail(409, 'You cannot change your own access');
+      if (match[2] === 'disable' && s.capabilities.includes('staff_admin')) throw new Fail(409, 'An owner cannot be removed here');
       if (match[2] === 'disable') s.disabled = true;
       if (match[2] === 'enable') s.disabled = false;
       if (match[2] === 'reset-authenticator') s.authenticatorSet = false;
@@ -910,7 +1149,11 @@ const routes: Route[] = [
     method: 'GET',
     path: /^\/admin\/audit$/,
     needs: ['staff_admin', 'platform'],
-    handle: ({ params }) => ok(page(db.audit.filter((a) => (!params.service || a.service === params.service) && matches(params.q, a.staffEmail, a.summary)), params, 25)),
+    handle: ({ params }) => {
+      const name = (email: string) => db.staff.find((x) => x.email === email)?.name ?? email.split('@')[0];
+      const rows = db.audit.map((a) => ({ ...a, staffName: name(a.staffEmail) }));
+      return ok(page(rows.filter((a) => (!params.service || a.service === params.service) && matches(params.q, a.staffEmail, a.staffName, a.summary)), params, 25));
+    },
   },
 ];
 
@@ -930,6 +1173,7 @@ export async function sampleBaseQuery(args: string | FetchArgs): Promise<Result>
 
   await wait(250 + Math.random() * 250);
 
+  lapseClaims();
   const route = routes.find((r) => r.method === method && r.path.test(path));
   if (!route) return { error: { status: 404, data: { status: 'fail', message: `Sample backend has no ${method} ${path}` } } };
   const req: Req = { method, params, body, code: headers['X-Admin-Code'], match: path.match(route.path)! };

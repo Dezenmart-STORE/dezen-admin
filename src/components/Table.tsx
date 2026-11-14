@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, Empty, ErrorNote } from './ui';
 
 export interface Column<T> {
@@ -46,6 +46,7 @@ export function Table<T>({
   href?: (row: T) => string;
   mobile?: (row: T) => MobileRow;
 }) {
+  const navigate = useNavigate();
   if (error) return <ErrorNote>{error}</ErrorNote>;
   return (
     <Card className="relative overflow-hidden">
@@ -108,7 +109,23 @@ export function Table<T>({
                 {rows.map((row) => {
                   const link = href?.(row);
                   return (
-                    <tr key={rowKey(row)} className={`border-b border-line align-top last:border-0 ${link ? 'transition-colors hover:bg-raised' : ''}`}>
+                    <tr
+                      key={rowKey(row)}
+                      // The whole row opens the record. The first cell stays a real link for the keyboard,
+                      // screen readers and "open in new tab"; clicks on buttons or links inside the row keep their own job.
+                      onClick={
+                        link
+                          ? (e) => {
+                              const t = e.target as HTMLElement;
+                              if (t.closest('a,button,input,select,textarea,label,[role="menu"]')) return;
+                              if (window.getSelection()?.toString()) return;
+                              if (e.metaKey || e.ctrlKey) window.open(link, '_blank');
+                              else navigate(link);
+                            }
+                          : undefined
+                      }
+                      className={`border-b border-line align-top last:border-0 ${link ? 'cursor-pointer transition-colors hover:bg-raised' : ''}`}
+                    >
                       {columns.map((c, i) => (
                         <td key={c.header} className={`px-4 py-3.5 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
                           {link && i === 0 ? (

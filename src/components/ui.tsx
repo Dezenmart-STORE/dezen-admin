@@ -125,39 +125,77 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
 // ── money ────────────────────────────────────────────────────────────────────
 
 const naira = new Intl.NumberFormat('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-/** Money, always in full with its currency. Never abbreviated. */
-export function Money({ amount, currency = 'NGN', className = '' }: { amount: number | null | undefined; currency?: string; className?: string }) {
+/**
+ * Money, always in full and always in naira. Shopping is paid in coins: pass the naira value fixed at
+ * payment as `ngn`, and `paidAs` on records to add the coin amount as small print. A coin amount with no
+ * naira value is shown as it is rather than guessed.
+ */
+export function Money({
+  amount,
+  currency = 'NGN',
+  ngn,
+  paidAs,
+  className = '',
+}: {
+  amount: number | null | undefined;
+  currency?: string;
+  ngn?: number;
+  paidAs?: boolean;
+  className?: string;
+}) {
   if (typeof amount !== 'number') return <span className="text-ink-3">—</span>;
-  const text = currency === 'NGN' ? `₦${naira.format(amount)}` : `${amount.toLocaleString('en-NG')} ${currency}`;
-  return <span className={`font-mono font-medium whitespace-nowrap ${className}`}>{text}</span>;
+  const coin = currency !== 'NGN';
+  const value = coin ? ngn : amount;
+  const text = typeof value === 'number' ? `₦${naira.format(value)}` : `${amount.toLocaleString('en-NG')} ${currency}`;
+  return (
+    <span className={`font-mono font-medium whitespace-nowrap ${className}`}>
+      {text}
+      {coin && typeof value === 'number' && paidAs && (
+        <span className="ml-1.5 font-sans text-[0.8em] font-normal text-ink-3">
+          paid as {amount.toLocaleString('en-NG')} {currency}
+        </span>
+      )}
+    </span>
+  );
 }
+/** The words for a coin amount, for buttons and receipts: "₦78,000 (50 cUSD)". */
+export const moneyWords = (amount: number, currency: string, ngn?: number) =>
+  currency === 'NGN' ? `₦${amount.toLocaleString('en-NG')}` : typeof ngn === 'number' ? `₦${ngn.toLocaleString('en-NG')} (${amount} ${currency})` : `${amount} ${currency}`;
 
 // ── layout pieces ────────────────────────────────────────────────────────────
 
+/**
+ * A page opens the way Home does: a sentence, not a shouted label. Queues pass `headline`, the sentence
+ * with the count that matters ("2 riders have waited past our promise"); the page's name then moves
+ * into the eyebrow. Wide caps are kept for the wordmark only.
+ */
 export function PageHeader({
   title,
+  headline,
   description,
   actions,
   service,
   eyebrow,
 }: {
   title: string;
-  description?: string;
+  headline?: ReactNode;
+  description?: ReactNode;
   actions?: ReactNode;
   service?: Service;
   eyebrow?: string;
 }) {
+  const crumb = headline ? [eyebrow, title].filter(Boolean).join(' · ') : eyebrow;
   return (
     <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        {(eyebrow || service) && (
+        {(crumb || service) && (
           <p className="mb-2.5 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">
             {service && <ServiceGlyph service={service} size={15} />}
-            {eyebrow}
+            {crumb}
           </p>
         )}
-        <h1 className="font-display text-[26px] leading-[1.05] sm:text-[30px] text-balance">{title}</h1>
-        {description && <p className="mt-2 max-w-[62ch] text-[14.5px] text-ink-2">{description}</p>}
+        <h1 className="max-w-[30ch] text-[26px] font-semibold leading-[1.15] tracking-tight text-balance sm:text-[32px]">{headline ?? title}</h1>
+        {description && <p className="mt-2.5 max-w-[62ch] text-[14.5px] text-ink-2">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </header>

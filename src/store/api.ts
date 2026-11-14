@@ -11,6 +11,10 @@ import { signedOut } from './session';
 import type {
   Approval,
   HomeData,
+  QueueKey,
+  QueueTop,
+  ReviewCase,
+  ReviewKind,
   AuditEvent,
   Claim,
   ClaimKind,
@@ -149,6 +153,7 @@ export const api = createApi({
     }),
 
     // ── home ──
+    queueTop: b.query<QueueTop, QueueKey>({ query: (key) => `/admin/queue/${key}`, providesTags: ['Queues'], transformResponse: unwrap }),
     home: b.query<HomeData, void>({ query: () => '/admin/home', providesTags: ['Queues'], transformResponse: unwrap }),
     queues: b.query<QueueItem[], void>({ query: () => '/admin/queues', providesTags: ['Queues'], transformResponse: unwrap }),
     search: b.query<SearchResult[], string>({
@@ -162,7 +167,12 @@ export const api = createApi({
       providesTags: ['Vendors'],
       transformResponse: unwrap,
     }),
-    reviewVendor: b.mutation<unknown, { id: string; status: Exclude<VendorStatus, 'pending'>; reason?: string }>({
+    reviewCase: b.query<ReviewCase, { kind: ReviewKind; id: string }>({
+      query: ({ kind, id }) => `/admin/reviews/${kind}/${id}`,
+      providesTags: ['Vendors', 'Riders', 'Providers'],
+      transformResponse: unwrap,
+    }),
+    reviewVendor: b.mutation<unknown, { id: string; status: Exclude<VendorStatus, 'pending'>; reason?: string; checks?: string[] }>({
       query: ({ id, ...body }) => ({ url: `/admin/food/vendors/${id}/review`, method: 'POST', body }),
       invalidatesTags: ['Vendors', 'Queues', 'Audit'],
     }),
@@ -186,12 +196,12 @@ export const api = createApi({
       providesTags: ['FoodOrders'],
       transformResponse: unwrap,
     }),
-    resolveFoodDispute: b.mutation<MoneyReceipt, { id: string; resolution: 'refund_buyer' | 'release_to_vendor'; amount: number } & CodeArgs>({
+    resolveFoodDispute: b.mutation<MoneyReceipt, { id: string; resolution: 'refund_buyer' | 'release_to_vendor' | 'split'; amount: number; vendorAmount?: number } & CodeArgs>({
       transformResponse: unwrap,
-      query: ({ id, code, resolution, reason, amount }) => ({
+      query: ({ id, code, resolution, reason, amount, vendorAmount }) => ({
         url: `/admin/food/disputes/${id}/resolve`,
         method: 'POST',
-        body: { resolution, note: reason, amount },
+        body: { resolution, note: reason, amount, vendorAmount },
         headers: withCode(code),
       }),
       invalidatesTags: ['FoodOrders', 'Queues', 'Approvals', 'Audit'],
@@ -203,7 +213,7 @@ export const api = createApi({
       providesTags: ['Riders'],
       transformResponse: unwrap,
     }),
-    verifyRider: b.mutation<unknown, { id: string; status: 'verified' | 'rejected'; reason?: string }>({
+    verifyRider: b.mutation<unknown, { id: string; status: 'verified' | 'rejected'; reason?: string; checks?: string[] }>({
       query: ({ id, ...body }) => ({ url: `/admin/express/riders/${id}/verify`, method: 'PATCH', body }),
       invalidatesTags: ['Riders', 'Queues', 'Audit'],
     }),
@@ -242,6 +252,11 @@ export const api = createApi({
       providesTags: ['Withdrawals'],
       transformResponse: unwrap,
     }),
+    askRiderToFixBank: b.mutation<{ asked: boolean }, { id: string }>({
+      query: ({ id }) => ({ url: `/admin/express/withdrawals/${id}/ask-rider`, method: 'POST', body: {} }),
+      transformResponse: unwrap,
+      invalidatesTags: ['Withdrawals', 'Audit'],
+    }),
     retryWithdrawal: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
       query: ({ id, code, amount }) => ({ url: `/admin/express/withdrawals/${id}/retry`, method: 'POST', body: { amount }, headers: withCode(code) }),
       transformResponse: unwrap,
@@ -262,7 +277,7 @@ export const api = createApi({
       providesTags: ['Providers'],
       transformResponse: unwrap,
     }),
-    verifyProvider: b.mutation<unknown, { id: string; status: 'verified' | 'rejected'; reason?: string }>({
+    verifyProvider: b.mutation<unknown, { id: string; status: 'verified' | 'rejected'; reason?: string; checks?: string[] }>({
       query: ({ id, ...body }) => ({ url: `/admin/express/providers/${id}/verify`, method: 'PATCH', body }),
       invalidatesTags: ['Providers', 'Queues', 'Audit'],
     }),
@@ -395,6 +410,9 @@ export const {
   useSignOutMutation,
   useQueuesQuery,
   useHomeQuery,
+  useQueueTopQuery,
+  useReviewCaseQuery,
+  useAskRiderToFixBankMutation,
   useClaimMutation,
   useReleaseMutation,
   useApprovalsQuery,
