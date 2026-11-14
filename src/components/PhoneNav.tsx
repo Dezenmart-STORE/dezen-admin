@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { FiBell, FiBellOff, FiChevronDown, FiChevronLeft, FiLogOut, FiSearch } from 'react-icons/fi';
 import { useHomeQuery } from '../store/api';
 import type { Service } from '../store/types';
-import { Mark, SERVICE_NAME, ServiceGlyph, StatusShape, Wordmark } from './brand';
+import { Mark, SERVICE_NAME, ServiceGlyph, Wordmark } from './brand';
 
 /**
  * The phone navigation, built around what staff do on a phone: take the next person, look someone up,
@@ -99,7 +99,10 @@ export function PhoneTabs({ approvals, showApprovals, onWork, workOpen, inWork }
   const { data: home } = useHomeQuery(undefined, { pollingInterval: 60_000 });
   const late = home?.latePeople ?? 0;
   const cls = (on: boolean) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium ${on ? 'text-ink' : 'text-ink-3'}`;
-  const icon = (node: ReactNode) => <span className="relative grid h-6 place-items-center">{node}</span>;
+  // Every tab lights the same way: a soft pill behind the icon and the icon in full colour.
+  const icon = (node: ReactNode, on: boolean) => (
+    <span className={`relative grid h-8 w-14 place-items-center rounded-full transition-colors duration-200 ${on ? 'bg-raised' : ''}`}>{node}</span>
+  );
   return (
     <nav aria-label="Quick" className={`fixed inset-x-0 bottom-0 z-30 grid border-t border-line bg-sunk pb-[env(safe-area-inset-bottom)] md:hidden ${showApprovals ? 'grid-cols-4' : 'grid-cols-3'}`}>
       <NavLink to="/" end className={({ isActive }) => cls(isActive)} aria-label={late ? `Home. ${late} people past our promise` : 'Home'}>
@@ -113,33 +116,46 @@ export function PhoneTabs({ approvals, showApprovals, onWork, workOpen, inWork }
                 </span>
                 <Badge n={late} tone="need" label={`${late} past our promise`} />
               </>,
+              isActive,
             )}
             Home
           </>
         )}
       </NavLink>
       <NavLink to="/search" className={({ isActive }) => cls(isActive)}>
-        {icon(<FiSearch aria-hidden className="h-5 w-5" />)}
-        Search
+        {({ isActive }) => (
+          <>
+            {icon(<FiSearch aria-hidden className="h-5 w-5" strokeWidth={isActive ? 2.6 : 2} />, isActive)}
+            Search
+          </>
+        )}
       </NavLink>
       {showApprovals && (
         <NavLink to="/approvals" className={({ isActive }) => cls(isActive)} aria-label={approvals ? `Approvals. ${approvals} waiting for you` : 'Approvals'}>
-          {icon(
+          {({ isActive }) => (
             <>
-              <StatusShape shape="ring" tone={approvals ? 'waiting' : 'quiet'} size={18} />
-              <Badge n={approvals} tone="need" label={`${approvals} waiting`} />
-            </>,
+              {icon(
+                <>
+                  {/* A ring: money on its way, waiting for a second person. Lit, it fills in. */}
+                  <span aria-hidden className={`block h-[18px] w-[18px] rounded-full border-[2.5px] ${isActive ? 'border-waiting bg-waiting/25' : approvals ? 'border-waiting' : 'border-ink-3'}`} />
+                  <Badge n={approvals} tone="need" label={`${approvals} waiting`} />
+                </>,
+                isActive,
+              )}
+              Approvals
+            </>
           )}
-          Approvals
         </NavLink>
       )}
       <button type="button" onClick={onWork} aria-haspopup="dialog" aria-expanded={workOpen} className={`${cls(inWork || workOpen)} cursor-pointer`}>
         {icon(
+          // The four services: grey at rest, the mark's red and white when you are in one of them.
           <span aria-hidden className="grid grid-cols-2 gap-[3px]">
-            {[0, 1, 2, 3].map((i) => (
-              <span key={i} className={`h-[7px] w-[7px] rounded-[2px] ${inWork || workOpen ? 'bg-ink' : 'bg-ink-3'}`} />
+            {(['brand-red', 'mark-white', 'brand-red', 'mark-white'] as const).map((c, i) => (
+              <span key={i} className="h-[7px] w-[7px] rounded-[2px] transition-colors duration-200" style={{ background: inWork || workOpen ? `var(--${c})` : 'var(--ink-3)' }} />
             ))}
           </span>,
+          inWork || workOpen,
         )}
         Work
       </button>
