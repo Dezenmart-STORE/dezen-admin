@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { FiBell, FiBellOff, FiCommand, FiHome, FiLogOut, FiMenu, FiSearch, FiWifiOff, FiX } from 'react-icons/fi';
+import { FiBell, FiBellOff, FiCommand, FiLogOut, FiSearch, FiWifiOff } from 'react-icons/fi';
 import { useAlertSetting, useOnline, useUrgentAlerts } from '../lib/device';
 import { useAppDispatch, useAppSelector, useCan } from '../store';
 import { accessLoaded, signedOut } from '../store/session';
@@ -8,6 +8,7 @@ import { api, useMeQuery, useQueuesQuery, useSignOutMutation } from '../store/ap
 import type { Capability, Service } from '../store/types';
 import { ServiceGlyph, Wordmark } from './brand';
 import { Shortcuts, showShortcuts } from './Shortcuts';
+import { PhoneTabs, PhoneTopBar, WorkSheet } from './PhoneNav';
 
 interface NavItem {
   to: string;
@@ -206,13 +207,6 @@ export function Layout() {
     </nav>
   );
 
-  const tab = (to: string, label: string, icon: ReactNode, end?: boolean) => (
-    <NavLink to={to} end={end} className={({ isActive }) => `flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${isActive ? 'text-ink' : 'text-ink-3'}`}>
-      {icon}
-      {label}
-    </NavLink>
-  );
-
   return (
     <div className="min-h-dvh md:flex">
       <a href="#main" className="sr-only z-50 rounded-leaf-sm bg-primary px-4 py-2 text-on-primary focus:not-sr-only focus:fixed focus:left-4 focus:top-4">
@@ -222,24 +216,12 @@ export function Layout() {
       {/* Desktop menu */}
       <aside className="hidden w-64 shrink-0 border-r border-line bg-sunk md:sticky md:top-0 md:block md:h-dvh">{menu}</aside>
 
-      {/* Phone menu sheet */}
-      {menuOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <button type="button" aria-label="Close menu" className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-[min(20rem,86vw)] bg-sunk pt-[env(safe-area-inset-top)] animate-[sheet-up_280ms_var(--ease-settle)]">
-            <button type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-[max(1rem,env(safe-area-inset-top))] cursor-pointer p-1 text-ink-3 hover:text-ink">
-              <FiX className="h-5 w-5" />
-            </button>
-            {menu}
-          </aside>
-        </div>
-      )}
+      {/* Phone: every queue in a sheet that rises from the Work tab */}
+      <WorkSheet open={menuOpen} onClose={() => setMenuOpen(false)} groups={groups} waiting={waiting} email={access?.email} alerts={alerts} onSignOut={leave} />
 
       <div className="min-w-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
-        {/* Phone top bar */}
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-ground px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:hidden">
-          <Wordmark compact />
-        </div>
+        {/* Phone top bar: where you are, always */}
+        <PhoneTopBar groups={groups} />
         {/* Desktop search */}
         <div className="sticky top-0 z-30 hidden border-b border-line bg-ground px-8 py-3 md:block">
           <div className="max-w-xl">
@@ -257,15 +239,14 @@ export function Layout() {
         </main>
       </div>
 
-      {/* Phone tabs */}
-      <nav aria-label="Quick" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-line bg-sunk pb-[env(safe-area-inset-bottom)] md:hidden">
-        {tab('/', 'Home', <FiHome className="h-5 w-5" />, true)}
-        {tab('/search', 'Search', <FiSearch className="h-5 w-5" />)}
-        <button type="button" onClick={() => setMenuOpen(true)} className="flex cursor-pointer flex-col items-center gap-1 py-2.5 text-[11px] font-medium text-ink-3">
-          <FiMenu className="h-5 w-5" />
-          Menu
-        </button>
-      </nav>
+      {/* Phone bar: the jobs */}
+      <PhoneTabs
+        approvals={waiting['/approvals'] ?? 0}
+        showApprovals={!!access?.capabilities.includes('move_money')}
+        onWork={() => setMenuOpen(true)}
+        workOpen={menuOpen}
+        inWork={!['/', '/search', '/approvals'].includes(pathname)}
+      />
     </div>
   );
 }

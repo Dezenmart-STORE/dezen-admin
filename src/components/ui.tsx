@@ -189,7 +189,8 @@ export function PageHeader({
     <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {(crumb || service) && (
-          <p className="mb-2.5 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">
+          // On a phone the top bar already says the service and page.
+          <p className="mb-2.5 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 max-md:hidden">
             {service && <ServiceGlyph service={service} size={15} />}
             {crumb}
           </p>
