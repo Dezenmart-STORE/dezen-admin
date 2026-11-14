@@ -9,7 +9,7 @@ import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
 import { ConfirmDialog } from '../../components/Dialog';
 import { Button, Money, PageHeader, Pagination, Status, Tag } from '../../components/ui';
-import { QueueTop } from '../../components/NextCard';
+import { QueueTop, Waited } from '../../components/NextCard';
 
 export function Products() {
   const can = useCan();
@@ -30,7 +30,8 @@ export function Products() {
   );
   const actions = (p: Product) =>
     mayModerate && (
-      <div className="flex flex-wrap justify-end gap-2">
+      // Stacked, so three buttons never squeeze the product column.
+      <div className="flex flex-col items-stretch gap-1.5">
         {p.visible && p.reports > 0 && (
           <Button size="sm" onClick={() => setKeeping(p)}>
             Keep it
@@ -90,6 +91,8 @@ export function Products() {
         columns={[
           {
             header: 'Product',
+            // The product and what buyers said is what staff read: it keeps its width and the rest gives way.
+            className: 'min-w-[18rem]',
             cell: (p) => (
               <>
                 <p className="font-semibold">{p.name}</p>
@@ -115,7 +118,9 @@ export function Products() {
           { header: 'Price', align: 'right', cell: (p) => <Money amount={p.price} currency={p.currency} ngn={p.priceNgn} /> },
           { header: 'In stock', align: 'right', cell: (p) => <span className="font-mono">{p.stock}</span> },
           { header: 'Shown', cell: shown },
-          { header: 'Listed', cell: (p) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(p.createdAt)}</span> },
+          list.status === 'reported'
+            ? { header: 'Waiting', align: 'right', cell: (p) => <Waited since={[...(p.reportNotes ?? []).map((n) => n.at)].sort()[0] ?? p.createdAt} promiseHours={48} /> }
+            : { header: 'Listed', cell: (p) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{formatDate(p.createdAt)}</span> },
           { header: '', cell: actions },
         ]}
       />
