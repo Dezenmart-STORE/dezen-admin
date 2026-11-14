@@ -5,7 +5,8 @@ import {
   type FetchArgs,
   type FetchBaseQueryError,
 } from '@reduxjs/toolkit/query/react';
-import { API_URL, USE_SAMPLE_DATA } from '../lib/config';
+import { API_URL, LIVE_AREAS, USE_SAMPLE_DATA } from '../lib/config';
+import { isLive } from '../lib/areas';
 import { sampleBaseQuery } from '../mocks/backend';
 import { signedOut } from './session';
 import type {
@@ -67,7 +68,8 @@ const withStaff = http('staff');
 
 /** A 401 that means the staff session is over (not a wrong authenticator code) signs out. */
 const baseQuery: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError, Extra> = async (args, api, extra) => {
-  const result = USE_SAMPLE_DATA
+  const path = typeof args === 'string' ? args : args.url;
+  const result = !isLive(path, USE_SAMPLE_DATA, LIVE_AREAS)
     ? await sampleBaseQuery(args)
     : await (extra?.auth === 'google' ? withGoogle : withStaff)(args, api, extra ?? {});
   const message = (result.error?.data as { message?: string } | undefined)?.message ?? '';

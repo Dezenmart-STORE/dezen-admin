@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { API_URL, USE_SAMPLE_DATA } from '../lib/config';
+import { API_URL, SAMPLE_SIGN_IN } from '../lib/config';
 import { errorMessage, statusOf } from '../lib/errors';
 import { PREVIEW_KEY, PREVIEW_ROLES } from '../mocks/backend';
 import { useAppDispatch, useAppSelector } from '../store';
@@ -40,7 +40,7 @@ export function SignIn() {
   if (staffToken) return <Navigate to="/" replace />;
   if (googleToken) return <Navigate to="/verify" replace />;
   // With sample data there is no Google step: go straight to the code step.
-  const href = USE_SAMPLE_DATA ? '/auth/google?token=sample' : `${API_URL}/auth/google?origin=${encodeURIComponent(window.location.origin)}`;
+  const href = SAMPLE_SIGN_IN ? '/auth/google?token=sample' : `${API_URL}/auth/google?origin=${encodeURIComponent(window.location.origin)}`;
   const choose = (v: string) => {
     setPreview(v);
     try {
@@ -56,7 +56,7 @@ export function SignIn() {
         Sign in with the Google account your access was given to, then enter the code from your authenticator.
       </p>
       <div className="mt-8 space-y-4">
-        {USE_SAMPLE_DATA && (
+        {SAMPLE_SIGN_IN && (
           <Field label="Preview as">
             <Select value={preview} onChange={(e) => choose(e.target.value)}>
               {Object.entries(PREVIEW_ROLES).map(([k, r]) => (
@@ -71,7 +71,7 @@ export function SignIn() {
           href={href}
           className="flex h-12 w-full items-center justify-center rounded-leaf-sm bg-primary text-[15px] font-semibold text-on-primary transition-opacity hover:opacity-90"
         >
-          {USE_SAMPLE_DATA ? 'Continue' : 'Continue with Google'}
+          {SAMPLE_SIGN_IN ? 'Continue' : 'Continue with Google'}
         </a>
       </div>
     </Shell>

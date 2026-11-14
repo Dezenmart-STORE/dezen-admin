@@ -20,7 +20,26 @@ A small "Sample data" tag in the menu says the data is not real.
 
 ## Connect the real backend
 
-When the backend checklist is done:
+The backend developer starts with [docs/HANDOVER.md](docs/HANDOVER.md): the order of work, how to go live one area at a time, and when an area is done.
+
+**One area at a time,** while the rest stays on sample data:
+
+```bash
+VITE_API_URL=https://<backend>/api/v1
+VITE_LIVE_AREAS=approvals,claims,food
+```
+
+**Contract tests** check every endpoint returns what the screens expect. By default they run on the sample backend; point them at the real one to check it (read-only):
+
+```bash
+npm run test:contract
+```
+
+```bash
+CONTRACT_API_URL=https://<backend>/api/v1 CONTRACT_TOKEN=<staff session token> npm run test:contract
+```
+
+**Everything live,** when the backend checklist is done:
 
 ```bash
 VITE_API_URL=https://<backend>/api/v1

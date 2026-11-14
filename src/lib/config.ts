@@ -1,3 +1,5 @@
+import { parseLiveAreas } from './areas';
+
 const env = import.meta.env as Record<string, string | undefined>;
 
 /** The backend base URL, including /api/v1. */
@@ -9,3 +11,12 @@ export const API_URL = env.VITE_API_URL?.replace(/\/$/, '') ?? 'http://localhost
  * VITE_USE_SAMPLE_DATA=false. Production builds must set it to false.
  */
 export const USE_SAMPLE_DATA = env.VITE_USE_SAMPLE_DATA !== 'false';
+
+/** Areas that use the real backend while sample mode is on (see lib/areas.ts). */
+export const LIVE_AREAS = parseLiveAreas(env.VITE_LIVE_AREAS);
+
+/** Sign-in is the sample one (pick a role, any code) only while no area is live. */
+export const SAMPLE_SIGN_IN = USE_SAMPLE_DATA && !LIVE_AREAS.has('auth');
+
+/** What the sample label says: "Sample data", or "Sample data · food, approvals live". */
+export const SAMPLE_LABEL = USE_SAMPLE_DATA ? `Sample data${LIVE_AREAS.size ? ` · ${[...LIVE_AREAS].filter((a) => a !== 'auth').join(', ')} live` : ''}` : '';

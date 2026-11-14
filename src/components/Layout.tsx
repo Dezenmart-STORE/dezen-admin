@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { FiBell, FiBellOff, FiHome, FiLogOut, FiMenu, FiSearch, FiWifiOff, FiX } from 'react-icons/fi';
 import { useAlertSetting, useOnline, useUrgentAlerts } from '../lib/device';
-import { USE_SAMPLE_DATA } from '../lib/config';
+import { SAMPLE_LABEL } from '../lib/config';
 import { useAppDispatch, useAppSelector, useCan } from '../store';
 import { accessLoaded, signedOut } from '../store/session';
 import { api, useMeQuery, useQueuesQuery, useSignOutMutation } from '../store/api';
@@ -172,9 +172,9 @@ export function Layout() {
         </div>
       ))}
       <div className="mt-auto space-y-3 border-t border-line px-3 pt-4">
-        {USE_SAMPLE_DATA && (
+        {SAMPLE_LABEL && (
           <span className="block font-mono text-[10.5px] uppercase tracking-[0.08em] text-waiting">
-            Sample data
+            {SAMPLE_LABEL}
           </span>
         )}
         {alerts.supported && (
@@ -233,7 +233,11 @@ export function Layout() {
         {/* Phone top bar */}
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-ground px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:hidden">
           <Wordmark compact />
-          {USE_SAMPLE_DATA && <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-waiting">Sample</span>}
+          {SAMPLE_LABEL && (
+            <span title={SAMPLE_LABEL} className="font-mono text-[10px] uppercase tracking-[0.08em] text-waiting">
+              Sample
+            </span>
+          )}
         </div>
         {/* Desktop search */}
         <div className="sticky top-0 z-30 hidden border-b border-line bg-ground px-8 py-3 md:block">
