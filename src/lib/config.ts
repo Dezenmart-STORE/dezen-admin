@@ -17,6 +17,3 @@ export const LIVE_AREAS = parseLiveAreas(env.VITE_LIVE_AREAS);
 
 /** Sign-in is the sample one (pick a role, any code) only while no area is live. */
 export const SAMPLE_SIGN_IN = USE_SAMPLE_DATA && !LIVE_AREAS.has('auth');
-
-/** What the sample label says: "Sample data", or "Sample data · food, approvals live". */
-export const SAMPLE_LABEL = USE_SAMPLE_DATA ? `Sample data${LIVE_AREAS.size ? ` · ${[...LIVE_AREAS].filter((a) => a !== 'auth').join(', ')} live` : ''}` : '';
