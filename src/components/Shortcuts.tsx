@@ -16,6 +16,10 @@ const GO: Record<string, { to: string; label: string }> = {
   l: { to: '/activity', label: 'Activity log' },
 };
 
+/** Anything can open the shortcuts list: the menu item dispatches this. */
+export const SHOW_SHORTCUTS = 'dezen:show-shortcuts';
+export const showShortcuts = () => window.dispatchEvent(new Event(SHOW_SHORTCUTS));
+
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   return !!el && (/^(input|textarea|select)$/i.test(el.tagName) || el.isContentEditable);
@@ -79,8 +83,13 @@ export function Shortcuts() {
         }
       }
     };
+    const open = () => setHelp(true);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener(SHOW_SHORTCUTS, open);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener(SHOW_SHORTCUTS, open);
+    };
   }, [navigate]);
 
   const Key = ({ children }: { children: string }) => (

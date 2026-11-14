@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { FiBell, FiBellOff, FiHome, FiLogOut, FiMenu, FiSearch, FiWifiOff, FiX } from 'react-icons/fi';
+import { FiBell, FiBellOff, FiCommand, FiHome, FiLogOut, FiMenu, FiSearch, FiWifiOff, FiX } from 'react-icons/fi';
 import { useAlertSetting, useOnline, useUrgentAlerts } from '../lib/device';
 import { useAppDispatch, useAppSelector, useCan } from '../store';
 import { accessLoaded, signedOut } from '../store/session';
 import { api, useMeQuery, useQueuesQuery, useSignOutMutation } from '../store/api';
 import type { Capability, Service } from '../store/types';
 import { ServiceGlyph, Wordmark } from './brand';
-import { Shortcuts } from './Shortcuts';
+import { Shortcuts, showShortcuts } from './Shortcuts';
 
 interface NavItem {
   to: string;
@@ -183,6 +183,18 @@ export function Layout() {
             {alerts.enabled ? 'Alerts on for urgent work' : 'Turn on alerts'}
           </button>
         )}
+        {/* Shown only where there is a keyboard and mouse; a phone has nothing to press. */}
+        <button
+          type="button"
+          onClick={showShortcuts}
+          className="flex w-full cursor-pointer items-center justify-between gap-2 text-[13px] text-ink-2 hover:text-ink [@media(pointer:coarse)]:hidden"
+        >
+          <span className="flex items-center gap-2">
+            <FiCommand aria-hidden className="h-3.5 w-3.5" />
+            Keyboard shortcuts
+          </span>
+          <kbd className="inline-grid min-w-5 place-items-center rounded-md border border-line bg-raised px-1 font-mono text-[11px] text-ink-2">?</kbd>
+        </button>
         <p className="truncate text-[12.5px] text-ink-3" title={access?.email}>
           {access?.email}
         </p>
