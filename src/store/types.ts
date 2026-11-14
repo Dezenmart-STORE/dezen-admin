@@ -219,7 +219,8 @@ export interface HomeToday {
   mine: { people: number; amount: number };
   team: { people: number; amount: number };
   /** Newest first: "Chiamaka has her refund". */
-  settled: { text: string; amount?: number; currency?: string; by: string; at: string; link?: string }[];
+  /** `service` lets Home show each person only what their access covers. */
+  settled: { service?: Service; text: string; amount?: number; currency?: string; by: string; at: string; link?: string }[];
   /** The last 7 days, oldest first: people settled vs new people waiting. */
   week: { day: string; cleared: number; added: number }[];
 }

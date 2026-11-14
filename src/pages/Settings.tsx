@@ -115,6 +115,20 @@ export function Settings() {
         </aside>
       )}
       </div>
+      {/* Phone: the save is always in reach once something changed, above the bottom tabs. */}
+      {mayEdit && changed.length > 0 && (
+        <>
+          <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 flex items-center gap-3 border-t border-line bg-sunk px-4 py-3 lg:hidden">
+            <span className="min-w-0 flex-1 text-[13px] text-ink-2">
+              {changed.length} {changed.length === 1 ? 'change' : 'changes'} · see what it changes below
+            </span>
+            <Button variant="primary" disabled={invalid} onClick={() => setConfirming(true)}>
+              Save
+            </Button>
+          </div>
+          <div aria-hidden className="h-20 lg:hidden" />
+        </>
+      )}
       {data && (
         <ConfirmWithCode
           open={confirming}

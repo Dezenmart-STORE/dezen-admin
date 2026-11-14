@@ -104,13 +104,14 @@ function Case({ c }: { c: ReviewCase }) {
         )}
       </header>
 
+      {/* Phone: photos, then the checks and decision, then what they typed. Wide: checks beside both. */}
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        <section aria-label="What they sent" className="min-w-0 space-y-6">
+        <section aria-label="What they sent" className="min-w-0 lg:col-start-1 lg:row-start-1">
           <div>
             <SectionTitle>What they sent</SectionTitle>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               {c.documents.map((d, i) => (
-                <figure key={d.id} className={i === 0 ? 'sm:col-span-2' : ''}>
+                <figure key={d.id} className={i === 0 ? 'col-span-2' : ''}>
                   {d.url ? (
                     <a href={d.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-leaf border border-line bg-raised">
                       <img src={d.url} alt={d.label} className={`${i === 0 ? 'aspect-[2.4]' : 'aspect-[1.6]'} w-full object-cover`} />
@@ -119,7 +120,7 @@ function Case({ c }: { c: ReviewCase }) {
                     <div className={`grid ${i === 0 ? 'aspect-[2.4]' : 'aspect-[1.6]'} place-items-center rounded-leaf border border-dashed border-line bg-raised px-4 text-center`}>
                       <span>
                         <span className="block text-[14px] font-semibold text-ink-2">{d.label}</span>
-                        <span className="mt-1 block text-[12px] text-ink-3">The photo shows here once the backend sends it</span>
+                        <span className="mt-1 block text-[12px] text-ink-3">Shows here once the backend sends it</span>
                       </span>
                     </div>
                   )}
@@ -131,6 +132,9 @@ function Case({ c }: { c: ReviewCase }) {
               ))}
             </div>
           </div>
+        </section>
+
+        <section aria-label="What they typed" className="min-w-0 lg:col-start-1 lg:row-start-2">
           <div>
             <SectionTitle>What they typed</SectionTitle>
             <Card className="p-5">
@@ -146,7 +150,7 @@ function Case({ c }: { c: ReviewCase }) {
           </div>
         </section>
 
-        <aside aria-label="Checks and decision" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
+        <aside aria-label="Checks and decision" className="min-w-0 max-lg:row-start-2 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
           <SectionTitle aside={pending ? <span className="font-mono text-[12px] text-ink-3">{done} of {all}</span> : undefined}>
             {pending ? 'Check before you approve' : 'Checked'}
           </SectionTitle>

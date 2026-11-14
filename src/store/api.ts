@@ -255,7 +255,7 @@ export const api = createApi({
     askRiderToFixBank: b.mutation<{ asked: boolean }, { id: string }>({
       query: ({ id }) => ({ url: `/admin/express/withdrawals/${id}/ask-rider`, method: 'POST', body: {} }),
       transformResponse: unwrap,
-      invalidatesTags: ['Withdrawals', 'Audit'],
+      invalidatesTags: ['Withdrawals', 'Queues', 'Audit'],
     }),
     retryWithdrawal: b.mutation<MoneyReceipt, { id: string; amount: number } & CodeArgs>({
       query: ({ id, code, amount }) => ({ url: `/admin/express/withdrawals/${id}/retry`, method: 'POST', body: { amount }, headers: withCode(code) }),
@@ -312,6 +312,10 @@ export const api = createApi({
       query: (params) => ({ url: '/admin/shopping/products', params }),
       providesTags: ['Products'],
       transformResponse: unwrap,
+    }),
+    keepProduct: b.mutation<unknown, { id: string; reason: string }>({
+      query: ({ id, reason }) => ({ url: `/admin/shopping/products/${id}/keep`, method: 'POST', body: { reason } }),
+      invalidatesTags: ['Products', 'Queues', 'Audit'],
     }),
     setProductVisibility: b.mutation<unknown, { id: string; visible: boolean; reason?: string }>({
       query: ({ id, visible, reason }) => ({
@@ -411,6 +415,7 @@ export const {
   useQueuesQuery,
   useHomeQuery,
   useQueueTopQuery,
+  useKeepProductMutation,
   useReviewCaseQuery,
   useAskRiderToFixBankMutation,
   useClaimMutation,

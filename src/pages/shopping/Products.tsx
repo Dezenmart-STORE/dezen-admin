@@ -3,7 +3,7 @@ import { errorMessage, failureOf } from '../../lib/errors';
 import { formatDate } from '../../lib/format';
 import { useListParams } from '../../lib/useListParams';
 import { useCan } from '../../store';
-import { useProductsQuery, useSellersQuery, useSetProductSponsoredMutation, useSetProductVisibilityMutation } from '../../store/api';
+import { useKeepProductMutation, useProductsQuery, useSellersQuery, useSetProductSponsoredMutation, useSetProductVisibilityMutation } from '../../store/api';
 import type { Product } from '../../store/types';
 import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
@@ -18,6 +18,8 @@ export function Products() {
   const [setVisible] = useSetProductVisibilityMutation();
   const [setSponsored, sponsoring] = useSetProductSponsoredMutation();
   const [acting, setActing] = useState<{ p: Product; show: boolean } | null>(null);
+  const [keeping, setKeeping] = useState<Product | null>(null);
+  const [keep] = useKeepProductMutation();
   const mayModerate = can('verify', 'shopping');
 
   const shown = (p: Product) => (
@@ -29,6 +31,11 @@ export function Products() {
   const actions = (p: Product) =>
     mayModerate && (
       <div className="flex flex-wrap justify-end gap-2">
+        {p.visible && p.reports > 0 && (
+          <Button size="sm" onClick={() => setKeeping(p)}>
+            Keep it
+          </Button>
+        )}
         {p.visible ? (
           <Button size="sm" variant="danger" onClick={() => setActing({ p, show: false })}>
             Hide
@@ -113,6 +120,16 @@ export function Products() {
         ]}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}
+      <ConfirmDialog
+        open={!!keeping}
+        title={keeping ? `Keep ${keeping.name} on sale` : ''}
+        summary="Its reports are cleared and it leaves this list. Buyers who reported it are not told."
+        actionLabel="Keep it on sale"
+        askReason
+        reasonHint="Why the reports did not hold up. Only staff see this."
+        onClose={() => setKeeping(null)}
+        onConfirm={async (reason) => failureOf(await keep({ id: keeping!.id, reason: reason ?? '' }))}
+      />
       <ConfirmDialog
         open={!!acting}
         title={acting ? `${acting.show ? 'Show' : 'Hide'} ${acting.p.name}` : ''}

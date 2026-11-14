@@ -111,7 +111,9 @@ export const foodOrders: FoodOrder[] = Array.from({ length: 36 }, (_, i) => {
     return { name: dish, quantity: int(1, 3), price };
   });
   const subtotal = items.reduce((s, it) => s + it.price * it.quantity, 0);
-  const deliveryFee = i % 3 === 0 ? 0 : pick([800, 1200, 1500]);
+  // Disputed orders were delivered, so the rider and delivery times in their case make sense.
+  const deliveryFee = i < 3 ? pick([800, 1200, 1500]) : i % 3 === 0 ? 0 : pick([800, 1200, 1500]);
+  const openedAt = ago(int(3, 40));
   const serviceFee = Math.ceil(subtotal * 0.05);
   const total = subtotal + deliveryFee + serviceFee;
   const status = i < 3 ? 'disputed' : i < 6 ? 'completed' : pick(['pending', 'accepted', 'preparing', 'ready', 'delivered', 'completed', 'cancelled']);
@@ -136,7 +138,7 @@ export const foodOrders: FoodOrder[] = Array.from({ length: 36 }, (_, i) => {
     refund: status === 'cancelled' ? (i % 2 ? { status: 'failed', amount: total, attempts: 5, lastError: 'Provider timeout' } : { status: 'paid', amount: total, attempts: 1 }) : undefined,
     dispute:
       status === 'disputed'
-        ? { reason: pick(['Food arrived cold and half the order was missing', 'Order never arrived', 'Wrong meal delivered']), openedAt: ago(int(3, 40)), resolved: false }
+        ? { reason: pick(['Food arrived cold and half the order was missing', 'Order never arrived', 'Wrong meal delivered']), openedAt, resolved: false }
         : undefined,
     case:
       status === 'disputed'
@@ -148,7 +150,8 @@ export const foodOrders: FoodOrder[] = Array.from({ length: 36 }, (_, i) => {
             vendorDisputesLost: int(0, 4),
           }
         : undefined,
-    createdAt: ago(int(1, 200)),
+    // A disputed order was placed a few hours before the buyer complained.
+    createdAt: status === 'disputed' ? new Date(new Date(openedAt).getTime() - 4 * 3_600_000).toISOString() : ago(int(1, 200)),
   };
 });
 
@@ -472,13 +475,13 @@ export const approvals: Approval[] = [
 
 /** People settled today, newest first. Money actions in the sample backend add to it. */
 export const settled: HomeToday['settled'] = [
-  { text: `${people[4].name.split(' ')[0]} got their refund`, amount: 3450, by: 'finance@dezenmart.com', at: ago(0.6) },
-  { text: 'Mama Put Kitchen was paid for 6 orders', amount: 42300, by: 'finance@dezenmart.com', at: ago(1.3) },
-  { text: `${riders[7].name} can withdraw again`, amount: 18400, by: 'you@dezenmart.com', at: ago(2.1) },
-  { text: 'Chop Life Grill can sell now', by: 'foods.ops@dezenmart.com', at: ago(2.8) },
-  { text: `${people[9].name.split(' ')[0]} got a trip refund`, amount: 2900, by: 'finance@dezenmart.com', at: ago(3.4) },
-  { text: `${riders[9].name} can drive now`, by: 'owner@dezenmart.com', at: ago(4.2) },
-  { text: 'Suya Spot was paid for 3 orders', amount: 15600, by: 'you@dezenmart.com', at: ago(5.1) },
+  { service: 'food', text: `${people[4].name.split(' ')[0]} got their refund`, amount: 3450, by: 'finance@dezenmart.com', at: ago(0.6) },
+  { service: 'food', text: 'Mama Put Kitchen was paid for 6 orders', amount: 42300, by: 'finance@dezenmart.com', at: ago(1.3) },
+  { service: 'express', text: `${riders[7].name} can withdraw again`, amount: 18400, by: 'you@dezenmart.com', at: ago(2.1) },
+  { service: 'food', text: 'Chop Life Grill can sell now', by: 'foods.ops@dezenmart.com', at: ago(2.8) },
+  { service: 'express', text: `${people[9].name.split(' ')[0]} got a trip refund`, amount: 2900, by: 'finance@dezenmart.com', at: ago(3.4) },
+  { service: 'express', text: `${riders[9].name} can drive now`, by: 'owner@dezenmart.com', at: ago(4.2) },
+  { service: 'food', text: 'Suya Spot was paid for 3 orders', amount: 15600, by: 'you@dezenmart.com', at: ago(5.1) },
 ];
 /** The last 7 days, oldest first (today is filled in live). */
 export const week = [

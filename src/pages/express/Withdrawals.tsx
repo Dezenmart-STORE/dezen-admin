@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { errorMessage, receiptOf } from '../../lib/errors';
+import { errorMessage, failureOf, receiptOf } from '../../lib/errors';
 import { formatDate } from '../../lib/format';
 import { useListParams } from '../../lib/useListParams';
 import { useCan } from '../../store';
@@ -7,7 +7,7 @@ import { useMarkWithdrawalPaidMutation, useRetryWithdrawalMutation, useWithdrawa
 import type { Withdrawal } from '../../store/types';
 import { Table } from '../../components/Table';
 import { ListToolbar } from '../../components/ListToolbar';
-import { MoneySheet } from '../../components/Dialog';
+import { ConfirmDialog, MoneySheet } from '../../components/Dialog';
 import { WHO } from '../../components/Choice';
 import { ClaimTag } from '../../components/ClaimBar';
 import { useAppSelector } from '../../store';
@@ -30,9 +30,10 @@ export function Withdrawals() {
   const [transferRef, setTransferRef] = useState('');
   const mayMove = can('move_money', 'express');
   const me = useAppSelector((s) => s.session.access?.email);
-  const [claim, claiming] = useClaimMutation();
+  const [claim] = useClaimMutation();
 
   const [ask, asking] = useAskRiderToFixBankMutation();
+  const [takingOver, setTakingOver] = useState<Withdrawal | null>(null);
 
   /** What unsticks it, in plain words. Only "Bank turned it back" is fixed by sending again. */
   const STEP: Record<NonNullable<Withdrawal['nextStep']>, string> = {
@@ -48,7 +49,9 @@ export function Withdrawals() {
       ? 'No checked bank account: send it from the bank, then record it here'
       : w.nextStep === 'rider_asked'
         ? `Asked ${formatDate(w.riderAskedAt)} · the bank said: ${w.lastError}`
-        : w.lastError
+        : w.nextStep === 'awaiting_approval' && w.bankDetailsUpdatedAt
+          ? `The bank said: ${w.lastError}. The rider changed their bank details ${formatDate(w.bankDetailsUpdatedAt)}`
+          : w.lastError
           ? `The bank said: ${w.lastError} · tried ${w.attempts} times`
           : undefined;
 
@@ -59,7 +62,7 @@ export function Withdrawals() {
       return (
         <span className="flex flex-col items-end gap-1">
           <ClaimTag claim={w.claim} />
-          <Button size="sm" variant="quiet" busy={claiming.isLoading && claiming.originalArgs?.id === w.id} onClick={() => claim({ kind: 'withdrawal', id: w.id, takeOver: true })}>
+          <Button size="sm" variant="quiet" onClick={() => setTakingOver(w)}>
             Take over
           </Button>
         </span>
@@ -144,6 +147,14 @@ export function Withdrawals() {
           { header: 'Waiting', align: 'right', cell: (w) => <Waited since={w.requestedAt} promiseHours={24} /> },
           { header: '', cell: (w) => <div className="flex justify-end">{action(w)}</div> },
         ]}
+      />
+      <ConfirmDialog
+        open={!!takingOver}
+        title="Take this over?"
+        summary={takingOver?.claim ? `${takingOver.claim.name} has been on ${takingOver.rider.name}'s withdrawal since ${formatDate(takingOver.claim.since)}. Talk to them first if you can; they will see that you took it over.` : ''}
+        actionLabel="Take it over"
+        onClose={() => setTakingOver(null)}
+        onConfirm={async () => failureOf(await claim({ kind: 'withdrawal', id: takingOver!.id, takeOver: true }))}
       />
       {data && <Pagination page={data.page} total={data.total} limit={data.limit} busy={isFetching} onChange={(page) => list.set({ page })} />}
       {acting && (

@@ -138,7 +138,7 @@ export function FoodOrderDetail() {
                   </div>
                 ) : (
                   <p className="text-sm text-ink-3 sm:col-span-2">
-                    {heldBy ? `${heldBy.name} is handling this dispute. Take it over above to rule on it.` : `${WHO.move_money} make the ruling on disputes.`}
+                    {heldBy ? `${heldBy.name} is handling this dispute. Take it over above to rule on it.` : `${WHO.move_money} rules on disputes. You can read the whole case here.`}
                   </p>
                 )}
               </div>

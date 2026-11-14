@@ -214,28 +214,22 @@ export function Reconciliation() {
                     <span className="font-medium">{formatDate(run.ranAt)}</span>
                     {run.ok ? <Status status="done" word="Matched" /> : <Status status="failed" word="Gap found" />}
                   </summary>
-                  <div className="overflow-x-auto border-t border-line px-4 pb-3">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-[12px] text-ink-3">
-                          <th scope="col" className="py-2 pr-4 font-medium">Check</th>
-                          <th scope="col" className="py-2 pr-4 text-right font-medium">Our records</th>
-                          <th scope="col" className="py-2 pr-4 text-right font-medium">Payment company</th>
-                          <th scope="col" className="py-2 text-right font-medium">Gap</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {run.checks.map((c) => (
-                          <tr key={c.name} className="border-t border-line">
-                            <td className="py-2 pr-4">{c.name}</td>
-                            <td className="py-2 pr-4 text-right font-mono">{formatNaira(c.ours)}</td>
-                            <td className="py-2 pr-4 text-right font-mono">{formatNaira(c.theirs)}</td>
-                            <td className={`py-2 text-right font-mono ${c.difference ? 'font-semibold text-need' : 'text-ink-3'}`}>{formatNaira(c.difference)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {/* A list, not a four-column table, so the gap stays in view on a phone. */}
+                  <ul className="divide-y divide-line border-t border-line">
+                    {run.checks.map((c) => (
+                      <li key={c.name} className="flex items-start justify-between gap-4 px-4 py-3 text-sm">
+                        <span className="min-w-0">
+                          <span className="block font-medium">{c.name}</span>
+                          <span className="mt-0.5 block font-mono text-[12px] text-ink-3">
+                            Ours {formatNaira(c.ours)} · theirs {formatNaira(c.theirs)}
+                          </span>
+                        </span>
+                        <span className={`shrink-0 text-right font-mono ${c.difference ? 'font-semibold text-need' : 'text-ink-3'}`}>
+                          {c.difference ? `${formatNaira(Math.abs(c.difference))} gap` : 'No gap'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </details>
               ))}
             </div>

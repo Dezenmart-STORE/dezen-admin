@@ -43,6 +43,7 @@ export function NextCard({
   viewOnly,
   promiseHours = 24,
   clear = ['Nothing is waiting on you.', 'Every rider, vendor and buyer you look after has what they were promised.'],
+  whoActs,
 }: {
   next: HomeNext | null;
   waiting: number;
@@ -50,6 +51,8 @@ export function NextCard({
   promiseHours?: number;
   /** The words when nobody is waiting at all. */
   clear?: [string, string];
+  /** Who acts when this person can only look: "Reviewers check these". */
+  whoActs?: string;
 }) {
   const navigate = useNavigate();
   const [claim, claiming] = useClaimMutation();
@@ -60,7 +63,7 @@ export function NextCard({
       waiting === 0
         ? clear
         : viewOnly
-          ? ['Nothing here needs you to act.', 'The people below are with teammates who can pay, rule or approve. Open any row to see where it stands when someone asks you.']
+          ? ['Nothing here needs you to act.', `${whoActs ?? 'The people below are with teammates who can pay, rule or approve'}. Open any row to see where it stands when someone asks you.`]
           : ['Everything waiting is already taken.', 'A teammate is on each one. Open a row to see who has it.'];
     return (
       <Card className="flex items-center gap-5 p-6 sm:p-7">
@@ -162,7 +165,8 @@ export function QueueTop({
   const sub =
     data && data.waitingPeople > 0 ? (
       <>
-        {n(data.waitingPeople)} waiting in all{data.oldestAt && <> · the longest for {ageWords(data.oldestAt)}</>}
+        {data.latePeople > 0 ? `${n(data.waitingPeople)} waiting in all` : 'The longest'}
+        {data.oldestAt && <>{data.latePeople > 0 ? ' · the longest' : ''} for {ageWords(data.oldestAt)}</>}
         {data.claimedBy.map((c) => (
           <span key={c.name} className="text-waiting">
             {' '}
@@ -193,7 +197,14 @@ export function QueueTop({
       {/* With one person waiting, the list already shows them: the card would only repeat it. */}
       {data && (data.waitingPeople !== 1 || !data.next) && (
         <div className="mb-8">
-          <NextCard next={data.next} waiting={data.waitingPeople} viewOnly={!data.canAct} promiseHours={data.promiseHours} clear={clear} />
+          <NextCard
+            next={data.next}
+            waiting={data.waitingPeople}
+            viewOnly={!data.canAct}
+            promiseHours={data.promiseHours}
+            clear={clear}
+            whoActs={['riders', 'vendors', 'providers', 'products'].includes(queue) ? 'Reviewers check and approve these' : 'Finance pays, rules on and approves these'}
+          />
         </div>
       )}
     </>

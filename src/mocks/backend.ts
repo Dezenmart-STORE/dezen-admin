@@ -233,7 +233,7 @@ const reviewCase = (kind: ReviewKind, id: string): ReviewCase => {
         { label: 'Vehicle', value: r.vehicleType },
         { label: 'Plate', value: r.plateNumber },
         { label: 'Licence number', value: r.licenceNumber },
-        { label: 'Pays out to', value: r.payoutAccount ? `${r.payoutAccount.accountName} · ${r.payoutAccount.bankName} ${r.payoutAccount.accountNumberMasked}` : 'No account yet' },
+        { label: 'Pays out to', value: r.payoutAccount ? `${r.payoutAccount.accountName} · ${r.payoutAccount.bankName} ${r.payoutAccount.accountNumberMasked}` : 'No checked account yet · paid by hand' },
       ],
       documents: [
         { id: 'licence', label: "Driver's licence", caption: `Uploaded ${shortDay(r.createdAt)}` },
@@ -323,7 +323,8 @@ const claimers = (items: { claim?: Claim | null }[]) => {
   return [...out].map(([name, count]) => ({ name, count }));
 };
 
-type Cand = HomeNext & { verb: keyof typeof PROMISE_H; rank: number; claimedByOther: boolean; queue: QueueKey };
+/** `blocked`: waiting on someone outside the team (a rider fixing their bank details), so never offered as next. */
+type Cand = HomeNext & { verb: keyof typeof PROMISE_H; rank: number; claimedByOther: boolean; queue: QueueKey; blocked?: boolean };
 
 /** Every individual thing waiting on staff that this person's access covers, each with its own age. */
 const candidates = (): Cand[] => {
@@ -340,7 +341,7 @@ const candidates = (): Cand[] => {
   const stuck = db.withdrawals.filter((w) => (w.status === 'failed' || w.status === 'manual') && !awaiting(w.id));
   if (covers('express'))
     for (const w of stuck)
-      cands.push({ verb: 'pay', rank: w.status === 'failed' && /name does not match|invalid account|account not found|insufficient balance/i.test(w.lastError ?? '') && !w.bankDetailsUpdatedAt ? 1.5 : 1, claimedByOther: !!w.claim && w.claim.by !== EMAIL, yours: w.claim?.by === EMAIL, queue: 'withdrawals', kind: 'Rider withdrawal', service: 'express', title: `${w.rider.name} has waited ${ageWords(w.requestedAt)} for ${naira(w.amount)}`, why: w.status !== 'failed' ? 'No checked bank account: send it from the bank, then record it here.' : /name does not match|invalid account|account not found/i.test(w.lastError ?? '') ? `The bank said: ${w.lastError}. Sending again will fail too, so ask them to fix their bank details in the app.` : /insufficient balance/i.test(w.lastError ?? '') ? 'Our payout wallet ran short. Top it up, then send again; the same payment reference is reused.' : `The bank turned it back: ${w.lastError}. Sending again is safe; the same payment reference is reused.`, amount: w.amount, waitingSince: w.requestedAt, link: '/express/withdrawals?status=stuck', claim: { kind: 'withdrawal', id: w.id } });
+      cands.push({ blocked: !!w.riderAskedAt && !w.bankDetailsUpdatedAt, verb: 'pay', rank: w.status === 'failed' && /name does not match|invalid account|account not found|insufficient balance/i.test(w.lastError ?? '') && !w.bankDetailsUpdatedAt ? 1.5 : 1, claimedByOther: !!w.claim && w.claim.by !== EMAIL, yours: w.claim?.by === EMAIL, queue: 'withdrawals', kind: 'Rider withdrawal', service: 'express', title: `${w.rider.name} has waited ${ageWords(w.requestedAt)} for ${naira(w.amount)}`, why: w.status !== 'failed' ? 'No checked bank account: send it from the bank, then record it here.' : /name does not match|invalid account|account not found/i.test(w.lastError ?? '') ? `The bank said: ${w.lastError}. Sending again will fail too, so ask them to fix their bank details in the app.` : /insufficient balance/i.test(w.lastError ?? '') ? 'Our payout wallet ran short. Top it up, then send again; the same payment reference is reused.' : `The bank turned it back: ${w.lastError}. Sending again is safe; the same payment reference is reused.`, amount: w.amount, waitingSince: w.requestedAt, link: '/express/withdrawals?status=stuck', claim: { kind: 'withdrawal', id: w.id } });
 
   const refunds = db.bookings.filter((b) => b.status === 'cancelled' && b.paymentStatus === 'paid');
   if (covers('express'))
@@ -381,7 +382,7 @@ const candidates = (): Cand[] => {
   const reported = db.products.filter((p) => p.reports > 0 && p.visible);
   if (covers('shopping'))
     for (const x of reported)
-      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'products', kind: 'Reported product', service: 'shopping', title: `${s(x.reports, 'buyer reported', 'buyers reported')} ${x.name}`, why: `Sold by ${x.seller.name}. Read what they said, then hide it or keep it.`, waitingSince: x.createdAt, link: '/shopping/products?status=reported' });
+      cands.push({ verb: 'review', rank: 3, claimedByOther: false, queue: 'products', kind: 'Reported product', service: 'shopping', title: `${s(x.reports, 'buyer reported', 'buyers reported')} ${x.name}`, why: `Sold by ${x.seller.name}. Read what they said, then hide it or keep it.`, waitingSince: [...(x.reportNotes ?? []).map((n) => n.at)].sort()[0] ?? x.createdAt, link: `/shopping/products?status=reported&q=${encodeURIComponent(x.name)}` });
   return cands;
 };
 
@@ -398,7 +399,7 @@ const queueTop = (key: QueueKey): QueueTop => {
   const verb = items[0]?.verb ?? ({ approvals: 'approve', withdrawals: 'pay', refunds: 'pay', 'food-money': 'pay', 'food-disputes': 'rule', 'shop-disputes': 'rule' } as Record<string, keyof typeof PROMISE_H>)[key] ?? 'review';
   const mine = items.find((c) => c.yours);
   // Something this person can finish now comes first; within that, whoever has waited longest.
-  const pick = mine ?? [...items].filter((c) => canDoFor(c) && !c.claimedByOther).sort((a, b) => a.rank - b.rank || a.waitingSince.localeCompare(b.waitingSince))[0];
+  const pick = mine ?? [...items].filter((c) => canDoFor(c) && !c.claimedByOther && !c.blocked).sort((a, b) => a.rank - b.rank || a.waitingSince.localeCompare(b.waitingSince))[0];
   const claimed = new Map<string, number>();
   for (const c of items) if (c.claimedByOther) {
     const rec = c.claim ? claimable(c.claim.kind, c.claim.id).rec : null;
@@ -406,7 +407,7 @@ const queueTop = (key: QueueKey): QueueTop => {
   }
   const strip = (c?: Cand): HomeNext | null => {
     if (!c) return null;
-    const { verb, rank: _r, claimedByOther: _c, queue: _q, ...n } = c;
+    const { verb, rank: _r, claimedByOther: _c, queue: _q, blocked: _b, ...n } = c;
     return { ...n, promiseHours: PROMISE_H[verb] };
   };
   return {
@@ -446,7 +447,7 @@ const home = (): HomeData => {
   const next =
     mine ??
     [...cands]
-      .filter((c) => canDo(c) && !c.claimedByOther)
+      .filter((c) => canDo(c) && !c.claimedByOther && !c.blocked)
       .sort((a, b) => a.rank - b.rank || Number(late(b)) - Number(late(a)) || a.waitingSince.localeCompare(b.waitingSince))[0];
 
   // Groups, by what the person will do.
@@ -490,13 +491,13 @@ const home = (): HomeData => {
   const providers = byStatus(db.providers, 'pending');
   if (covers('express') && providers.length) review.push(row('providers', 'express', `${s(providers.length, 'delivery company wants', 'delivery companies want')} to deliver`, 'Coverage and contacts', providers, null, providers.map((p) => p.createdAt), 'review', '/express/providers?status=pending', can('verify', 'express')));
   const reported = db.products.filter((p) => p.reports > 0 && p.visible);
-  if (covers('shopping') && reported.length) review.push(row('products', 'shopping', `${s(reported.length, 'product was', 'products were')} reported by buyers`, 'Hide or keep them', reported, null, reported.map((p) => p.createdAt), 'review', '/shopping/products?status=reported', can('verify', 'shopping')));
+  if (covers('shopping') && reported.length) review.push(row('products', 'shopping', `${s(reported.length, 'product was', 'products were')} reported by buyers`, 'Hide or keep them', reported, null, reported.map((p) => [...(p.reportNotes ?? []).map((n) => n.at)].sort()[0] ?? p.createdAt), 'review', '/shopping/products?status=reported', can('verify', 'shopping')));
   if (review.length) groups.push({ verb: 'review', label: 'To review', summary: `${sum(review.map((x) => x.count))} waiting`, rows: review });
 
   // Today.
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const today = db.settled.filter((x) => new Date(x.at) >= todayStart);
+  const today = db.settled.filter((x) => new Date(x.at) >= todayStart && (!x.service || covers(x.service)));
   const tally = (xs: typeof today) => ({ people: xs.length, amount: sum(xs.map((x) => x.amount ?? 0)) });
   const week = db.week.map((d, i) => (i === db.week.length - 1 ? { ...d, cleared: today.length } : d));
 
@@ -511,7 +512,7 @@ const home = (): HomeData => {
     latePeople: cands.filter(late).length,
     waitingPeople: cands.length,
     oldestAt: oldestOf(cands.map((c) => c.waitingSince)),
-    next: next ? (({ verb, rank: _r, claimedByOther: _c, queue: _q, ...n }) => ({ ...n, promiseHours: PROMISE_H[verb] }))(next) : null,
+    next: next ? (({ verb, rank: _r, claimedByOther: _c, queue: _q, blocked: _b, ...n }) => ({ ...n, promiseHours: PROMISE_H[verb] }))(next) : null,
     groups,
     today: { mine: tally(today.filter((x) => x.by === EMAIL)), team: tally(today), settled: today.slice(0, 6), week },
     services,
@@ -671,10 +672,12 @@ const routes: Route[] = [
         [`${o.buyer.name} paid ₦${o.total.toLocaleString('en-NG')}`, 'payment'],
         [`${o.vendor.name} accepted`, 'status'],
       ];
-      if (o.dispute) steps.push([`${o.buyer.name} opened a dispute: “${o.dispute.reason}”`, 'message']);
+      if (o.fulfilment === 'delivery') steps.push(['Delivered to the buyer', 'status']);
       if (o.payout) steps.push([o.payout.status === 'failed' ? `Vendor payout failed ${o.payout.attempts} times: ${o.payout.lastError}` : o.payout.status === 'paid' ? 'Vendor paid' : 'Vendor payout on its way', 'payment']);
       if (o.refund) steps.push([o.refund.status === 'failed' ? `Refund failed ${o.refund.attempts} times: ${o.refund.lastError}` : o.refund.status === 'paid' ? 'Buyer refunded' : 'Refund on its way', 'payment']);
-      return ok({ ...o, timeline: [...db.timelineFor(o.createdAt, steps), ...(notes[o.id] ?? [])] });
+      // The dispute sits at the moment it was opened, not on the order's own clock.
+      const dispute = o.dispute ? [{ at: o.dispute.openedAt, kind: 'message' as const, text: `${o.buyer.name} opened a dispute: “${o.dispute.reason}”` }] : [];
+      return ok({ ...o, timeline: [...db.timelineFor(o.createdAt, steps), ...dispute, ...(notes[o.id] ?? [])].sort((a, b) => a.at.localeCompare(b.at)) });
     },
   },
   {
@@ -867,6 +870,8 @@ const routes: Route[] = [
     handle: (req) => {
       const w = find(db.withdrawals, req.match[1], 'Withdrawal');
       w.riderAskedAt = now();
+      // Nothing is left for staff until the rider acts, so the claim is let go.
+      if (w.claim?.by === EMAIL) w.claim = null;
       return ok({ asked: true });
     },
   },
@@ -985,7 +990,8 @@ const routes: Route[] = [
     needs: ['support', 'shopping'],
     handle: ({ params }) => {
       let xs = db.products;
-      if (params.status === 'reported') xs = xs.filter((p) => p.reports > 0);
+      // Reported means still on sale and not yet looked at; a hidden product has been dealt with.
+      if (params.status === 'reported') xs = xs.filter((p) => p.reports > 0 && p.visible);
       if (params.status === 'hidden') xs = xs.filter((p) => !p.visible);
       return ok(page(xs.filter((p) => matches(params.q, p.name, p.seller.name)), params));
     },
@@ -1000,6 +1006,19 @@ const routes: Route[] = [
       if (req.match[2] === 'hide') needReason(req);
       p.visible = req.match[2] === 'show';
       if (p.visible) p.reports = 0;
+      return ok(p);
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/keep$/,
+    needs: ['verify', 'shopping'],
+    log: (r) => `Kept ${db.products.find((p) => p.id === r.match[1])?.name} on sale after reports`,
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      needReason(req);
+      p.reports = 0;
+      p.reportNotes = undefined;
       return ok(p);
     },
   },
