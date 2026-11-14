@@ -94,7 +94,7 @@ const Badge = ({ n, tone, label }: { n: number; tone: 'need' | 'quiet'; label: s
     </span>
   ) : null;
 
-/** The bar: Next, Search, Approvals (only for people who can move money), Work. */
+/** The bar: Home, Search, Approvals (only for people who can move money), Work. */
 export function PhoneTabs({ approvals, showApprovals, onWork, workOpen, inWork }: { approvals: number; showApprovals: boolean; onWork: () => void; workOpen: boolean; inWork: boolean }) {
   const { data: home } = useHomeQuery(undefined, { pollingInterval: 60_000 });
   const late = home?.latePeople ?? 0;
@@ -102,18 +102,19 @@ export function PhoneTabs({ approvals, showApprovals, onWork, workOpen, inWork }
   const icon = (node: ReactNode) => <span className="relative grid h-6 place-items-center">{node}</span>;
   return (
     <nav aria-label="Quick" className={`fixed inset-x-0 bottom-0 z-30 grid border-t border-line bg-sunk pb-[env(safe-area-inset-bottom)] md:hidden ${showApprovals ? 'grid-cols-4' : 'grid-cols-3'}`}>
-      <NavLink to="/" end className={({ isActive }) => cls(isActive)} aria-label={late ? `Next. ${late} people past our promise` : 'Next'}>
+      <NavLink to="/" end className={({ isActive }) => cls(isActive)} aria-label={late ? `Home. ${late} people past our promise` : 'Home'}>
         {({ isActive }) => (
           <>
             {icon(
               <>
-                <span aria-hidden className="grid place-items-center">
-                  <Mark size={20} lit={isActive ? undefined : {}} />
+                {/* Always the solid mark so it reads at a glance; in grey until you are on Home. */}
+                <span aria-hidden className={`grid place-items-center transition-[filter,opacity] ${isActive ? '' : 'opacity-70 grayscale'}`}>
+                  <Mark size={20} />
                 </span>
                 <Badge n={late} tone="need" label={`${late} past our promise`} />
               </>,
             )}
-            Next
+            Home
           </>
         )}
       </NavLink>
