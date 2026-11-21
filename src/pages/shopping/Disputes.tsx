@@ -19,6 +19,10 @@ type Resolution = 'refund_buyer' | 'release_to_seller';
  * Staff decide; an owner carries the decision out. Paying a Shopping seller or refunding a buyer
  * moves money held by the payment contract, which only the owner's separate key may do.
  */
+/** Who opened it, in words. Staff open one per paid order when a listing is removed as a scam. */
+const OPENED_BY = { buyer: 'the buyer', seller: 'the seller', staff: 'Dezen staff, after removing the listing' } as const;
+const SAYS = { buyer: 'The buyer says', seller: 'The seller says', staff: 'Dezen staff say' } as const;
+
 export function ShopDisputes() {
   const can = useCan();
   const list = useListParams();
@@ -86,7 +90,7 @@ export function ShopDisputes() {
               <>
                 <p className="max-w-[40ch]">“{d.reason}”</p>
                 <p className="mt-0.5 text-[12px] text-ink-3">
-                  Opened by the {d.openedBy} · {formatDate(d.openedAt)}
+                  Opened by {OPENED_BY[d.openedBy]} · {formatDate(d.openedAt)}
                 </p>
               </>
             ),
@@ -103,7 +107,7 @@ export function ShopDisputes() {
         {choosing && (
           <div className="space-y-5">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3">The {choosing.openedBy} says</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3">{SAYS[choosing.openedBy]}</p>
               <p className="mt-1.5 text-[17px] leading-snug">“{choosing.reason}”</p>
               <p className="mt-1.5 text-[13px] text-ink-3">
                 {choosing.order.quantity} × {choosing.order.product.name} · {choosing.order.buyer.name} bought from {choosing.order.seller.name}

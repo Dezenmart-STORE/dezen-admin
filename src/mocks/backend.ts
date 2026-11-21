@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, QueueItem, QueueKey, QueueTop, ReviewCase, ReviewKind, Withdrawal, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, ProductDecision, QueueItem, QueueKey, QueueTop, ReviewCase, ReviewKind, Withdrawal, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -94,6 +94,62 @@ const checkAmount = (req: Req, expected: number) => {
   if (Number(req.body.amount) !== expected) throw new Fail(422, `The amount must be exactly ${expected.toLocaleString('en-NG')}`);
 };
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+/** What staff confirm before marking a listing fine. Same ids as the product page. */
+const PRODUCT_CHECKS = ['photos', 'details', 'price', 'allowed', 'brand'];
+const REMOVAL_REASONS = ['scam', 'not_allowed', 'misleading', 'photos', 'other'];
+const REMOVAL_WORDS: Record<string, string> = { scam: 'Looks like a scam or a fake', not_allowed: 'Not allowed on Dezenmart', misleading: 'Wrong or misleading details', photos: 'Photos break our rules', other: 'Something else' };
+/** Removals that put the buyers who already paid at risk: their orders are held for refunds. */
+const HOLD_REASONS = ['scam', 'not_allowed'];
+type StoredProduct = (typeof db.products)[number];
+/** A listing needs a look when it was never looked over, changed since, or the seller says a hidden one is fixed. */
+const needsLook = (p: StoredProduct) =>
+  !p.removed && (p.reports > 0 || (p.visible ? !p.reviewedAt || (!!p.changedAt && p.changedAt > p.reviewedAt) : !!p.fixedAt));
+const listing = (p: StoredProduct) => ({ ...p, needsLook: needsLook(p) });
+/** The listings in one view (tab) of the Products page, before category, search and sort. */
+const productsIn = (status?: string) => {
+  // Removed listings only show under "Removed"; every other view is what is still on record for sale.
+  const xs = status === 'removed' ? db.products.filter((p) => p.removed) : db.products.filter((p) => !p.removed);
+  // Reported means still on sale and not yet looked at; a hidden product has been dealt with.
+  if (status === 'reported') return xs.filter((p) => p.reports > 0 && p.visible);
+  // To review: never looked over, changed by the seller since, or hidden and now "fixed".
+  if (status === 'review') return xs.filter((p) => !p.reports && needsLook(p));
+  if (status === 'hidden') return xs.filter((p) => !p.visible);
+  return xs;
+};
+const firstReport = (p: StoredProduct) => [...(p.reportNotes ?? []).map((n) => n.at)].sort()[0] ?? p.createdAt;
+/** Every order the Products list can be put in. Prices compare in naira, since listings use different coins. */
+const PRODUCT_SORTS: Record<string, (a: StoredProduct, b: StoredProduct) => number> = {
+  price_asc: (a, b) => a.priceNgn - b.priceNgn,
+  price_desc: (a, b) => b.priceNgn - a.priceNgn,
+  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
+  stock_asc: (a, b) => a.stock - b.stock,
+  stock_desc: (a, b) => b.stock - a.stock,
+  most_reported: (a, b) => b.reports - a.reports,
+  waiting: (a, b) => firstReport(a).localeCompare(firstReport(b)),
+  // The seller's latest change counts as when it joined the queue.
+  queued: (a, b) => (a.changedAt ?? a.createdAt).localeCompare(b.changedAt ?? b.createdAt),
+  removed_newest: (a, b) => (b.removed?.at ?? '').localeCompare(a.removed?.at ?? ''),
+};
+/** Each view's own order when staff have not picked one. */
+const DEFAULT_SORT: Record<string, string> = { reported: 'waiting', review: 'queued', removed: 'removed_newest', hidden: 'newest', '': 'newest' };
+const openOrdersOf = (productId: string) => db.shopOrders.filter((o) => o.product.id === productId && o.held && o.status !== 'disputed');
+const needAllChecks = (req: Req) => {
+  const checks = Array.isArray(req.body.checks) ? (req.body.checks as string[]) : [];
+  if (PRODUCT_CHECKS.some((c) => !checks.includes(c))) throw new Fail(422, 'Tick every check first');
+};
+/** Every decision keeps the listing as staff saw it, so a later edit can't change what was judged. */
+const decide = (p: StoredProduct, kind: ProductDecision['kind'], note?: string, checks?: string[]) => {
+  const about = db.productAbout[p.id] ?? { description: '', photos: 0 };
+  (db.productHistory[p.id] ??= []).unshift({
+    kind,
+    by: EMAIL,
+    at: now(),
+    note,
+    checks,
+    snapshot: { name: p.name, category: p.category, price: p.price, currency: p.currency, priceNgn: p.priceNgn, stock: p.stock, description: about.description, photos: about.photos },
+  });
+};
 
 // ── claims ───────────────────────────────────────────────────────────────────
 
@@ -989,37 +1045,139 @@ const routes: Route[] = [
     path: /^\/admin\/shopping\/products$/,
     needs: ['support', 'shopping'],
     handle: ({ params }) => {
-      let xs = db.products;
-      // Reported means still on sale and not yet looked at; a hidden product has been dealt with.
-      if (params.status === 'reported') xs = xs.filter((p) => p.reports > 0 && p.visible);
-      if (params.status === 'hidden') xs = xs.filter((p) => !p.visible);
-      return ok(page(xs.filter((p) => matches(params.q, p.name, p.seller.name)), params));
+      let xs = productsIn(params.status);
+      if (params.category) xs = xs.filter((p) => p.category === params.category);
+      if (params.sort && !PRODUCT_SORTS[params.sort]) throw new Fail(422, 'Unknown sort');
+      xs = [...xs].sort(PRODUCT_SORTS[params.sort || DEFAULT_SORT[params.status ?? ''] || 'newest']);
+      return ok(page(xs.filter((p) => matches(params.q, p.name, p.seller.name)).map(listing), params));
     },
   },
   {
-    method: 'POST',
-    path: /^\/admin\/shopping\/products\/([^/]+)\/(hide|show)$/,
-    needs: ['verify', 'shopping'],
-    log: (r) => `${r.match[2] === 'hide' ? 'Hid' : 'Showed'} product ${db.products.find((p) => p.id === r.match[1])?.name}`,
-    handle: (req) => {
-      const p = find(db.products, req.match[1], 'Product');
-      if (req.match[2] === 'hide') needReason(req);
-      p.visible = req.match[2] === 'show';
-      if (p.visible) p.reports = 0;
-      return ok(p);
+    method: 'GET',
+    path: /^\/admin\/shopping\/categories$/,
+    needs: ['support', 'shopping'],
+    handle: ({ params }) => {
+      const counts = new Map<string, number>();
+      for (const p of productsIn(params.status)) counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
+      return ok([...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name)));
     },
   },
   {
-    method: 'POST',
-    path: /^\/admin\/shopping\/products\/([^/]+)\/keep$/,
-    needs: ['verify', 'shopping'],
-    log: (r) => `Kept ${db.products.find((p) => p.id === r.match[1])?.name} on sale after reports`,
+    method: 'GET',
+    path: /^\/admin\/shopping\/products\/([^/]+)$/,
+    needs: ['support', 'shopping'],
     handle: (req) => {
       const p = find(db.products, req.match[1], 'Product');
-      needReason(req);
+      const about = db.productAbout[p.id] ?? { description: '', photos: 0 };
+      const theirs = db.products.filter((x) => x.seller.id === p.seller.id);
+      const seller = db.sellers.find((x) => x.id === p.seller.id);
+      return ok({
+        ...listing(p),
+        description: about.description,
+        // Sample data has no photos; the real backend signs a short-lived link for each.
+        photos: Array.from({ length: about.photos }, (_, i) => ({ id: `${p.id}-ph${i + 1}` })),
+        openOrders: openOrdersOf(p.id).length,
+        history: db.productHistory[p.id] ?? [],
+        seller: {
+          id: p.seller.id,
+          name: p.seller.name,
+          joinedAt: seller?.joinedAt ?? p.createdAt,
+          listed: theirs.filter((x) => x.id !== p.id && !x.removed && x.visible).length,
+          removedBefore: theirs.filter((x) => x.id !== p.id && x.removed).length,
+          ordersCompleted: seller?.ordersCompleted ?? 0,
+          disputes: seller?.disputes ?? 0,
+        },
+      });
+    },
+  },
+  {
+    // The one way a listing is cleared: every check ticked. It also clears buyer reports (with a note
+    // staff keep) and puts a hidden listing back on sale, so neither can skip the checks.
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/reviewed$/,
+    needs: ['verify', 'shopping'],
+    log: (r) => {
+      const p = db.products.find((x) => x.id === r.match[1]);
+      return p && !p.visible ? `Looked over ${p.name} and put it back on sale` : p?.reports ? `Kept ${p.name} on sale after reports` : `Looked over ${p?.name} and found nothing wrong`;
+    },
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      if (p.removed) throw new Fail(409, 'This listing has already been removed');
+      needAllChecks(req);
+      const note = String(req.body.note ?? '').trim();
+      if (p.reports > 0 && note.length < 3) throw new Fail(422, 'Say why the reports did not hold up');
+      const kind = !p.visible ? 'shown' : p.reports > 0 ? 'kept' : 'looked_over';
+      decide(p, kind, note || undefined, req.body.checks as string[]);
       p.reports = 0;
       p.reportNotes = undefined;
-      return ok(p);
+      p.visible = true;
+      p.hidden = undefined;
+      p.fixedAt = undefined;
+      p.changedAt = undefined;
+      p.changes = undefined;
+      p.reviewedAt = now();
+      p.reviewedBy = EMAIL;
+      return ok(listing(p));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/remove$/,
+    needs: ['verify', 'shopping'],
+    log: (r) => `Removed ${db.products.find((p) => p.id === r.match[1])?.name} from Dezenmart (${String(r.body.reason)}) and told the seller`,
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      if (p.removed) throw new Fail(409, 'This listing has already been removed');
+      const reason = String(req.body.reason ?? '');
+      if (!REMOVAL_REASONS.includes(reason)) throw new Fail(422, 'Choose why it is being removed');
+      const message = String(req.body.message ?? '').trim();
+      if (message.length < 20) throw new Fail(422, 'Write the seller a message of at least 20 characters');
+      // A scam or a banned item: the buyers who already paid are the ones at risk. Their payments stay
+      // held and each order becomes a dispute, so staff can refund them instead of paying the seller.
+      const held = HOLD_REASONS.includes(reason) ? openOrdersOf(p.id) : [];
+      for (const o of held) {
+        o.status = 'disputed';
+        db.shopDisputes.unshift({
+          id: `sd-${o.id}`,
+          order: o,
+          reason: `Listing removed: ${REMOVAL_WORDS[reason].toLowerCase()}. Hold the payment and refund the buyer.`,
+          openedBy: 'staff',
+          openedAt: now(),
+        });
+      }
+      decide(p, 'removed', message);
+      p.visible = false;
+      p.sponsored = false;
+      p.removed = { reason: reason as never, message, by: EMAIL, at: now(), heldOrders: held.length };
+      return ok(listing(p));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/hide$/,
+    needs: ['verify', 'shopping'],
+    log: (r) => `Hid product ${db.products.find((p) => p.id === r.match[1])?.name}`,
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      if (p.removed) throw new Fail(409, 'This listing has already been removed');
+      const reason = needReason(req);
+      decide(p, 'hidden', reason);
+      p.visible = false;
+      p.sponsored = false;
+      p.hidden = { reason, by: EMAIL, at: now() };
+      p.fixedAt = undefined;
+      return ok(listing(p));
+    },
+  },
+  {
+    // Showing a hidden listing again goes through the checks, the same as any review.
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/(show|keep)$/,
+    needs: ['verify', 'shopping'],
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      if (p.removed) throw new Fail(409, 'This listing has already been removed');
+      throw new Fail(422, 'Open the listing and tick every check: it goes back on sale from there');
     },
   },
   {
@@ -1029,8 +1187,10 @@ const routes: Route[] = [
     log: (r) => `${r.body.sponsored ? 'Sponsored' : 'Stopped sponsoring'} ${db.products.find((p) => p.id === r.match[1])?.name}`,
     handle: (req) => {
       const p = find(db.products, req.match[1], 'Product');
+      if (p.removed) throw new Fail(409, 'This listing has already been removed');
+      if (!p.visible) throw new Fail(409, 'A hidden listing cannot be sponsored');
       p.sponsored = Boolean(req.body.sponsored);
-      return ok(p);
+      return ok(listing(p));
     },
   },
   {

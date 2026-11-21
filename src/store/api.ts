@@ -32,6 +32,8 @@ import type {
   PersonPrivate,
   PersonSummary,
   Product,
+  ProductDetail,
+  RemovalReason,
   QueueItem,
   ReconciliationRun,
   Rider,
@@ -84,7 +86,7 @@ const withCode = (code: string) => ({ 'X-Admin-Code': code });
 const unwrap = <T,>(r: Envelope<T>) => r.data;
 
 export type CodeArgs = { code: string; reason?: string };
-type PageArgs = { page?: number; status?: string; q?: string; type?: string; provider?: string };
+type PageArgs = { page?: number; status?: string; q?: string; type?: string; provider?: string; category?: string; sort?: string };
 
 const TAGS = [
   'Queues',
@@ -315,6 +317,31 @@ export const api = createApi({
       providesTags: ['Products'],
       transformResponse: unwrap,
     }),
+    /** The categories in a view, with how many listings each has, for the category filter. */
+    productCategories: b.query<{ name: string; count: number }[], { status?: string }>({
+      query: (params) => ({ url: '/admin/shopping/categories', params }),
+      providesTags: ['Products'],
+      transformResponse: unwrap,
+    }),
+    product: b.query<ProductDetail, string>({
+      query: (id) => `/admin/shopping/products/${id}`,
+      providesTags: ['Products'],
+      transformResponse: unwrap,
+    }),
+    /** Looked the listing over and it is fine: it leaves the "To review" list. */
+    /**
+     * Looked the listing over and it is fine. Clears buyer reports (needs a note then) and puts a hidden
+     * listing back on sale. Every check must be ticked.
+     */
+    markProductReviewed: b.mutation<unknown, { id: string; checks: string[]; note?: string }>({
+      query: ({ id, ...body }) => ({ url: `/admin/shopping/products/${id}/reviewed`, method: 'POST', body }),
+      invalidatesTags: ['Products', 'Queues', 'Audit', 'ShopDisputes'],
+    }),
+    /** Takes the listing off Dezenmart for good and sends the seller the notice. Paid orders carry on. */
+    removeProduct: b.mutation<unknown, { id: string; reason: RemovalReason; message: string }>({
+      query: ({ id, ...body }) => ({ url: `/admin/shopping/products/${id}/remove`, method: 'POST', body }),
+      invalidatesTags: ['Products', 'Queues', 'Audit', 'ShopDisputes', 'ShopOrders'],
+    }),
     keepProduct: b.mutation<unknown, { id: string; reason: string }>({
       query: ({ id, reason }) => ({ url: `/admin/shopping/products/${id}/keep`, method: 'POST', body: { reason } }),
       invalidatesTags: ['Products', 'Queues', 'Audit'],
@@ -418,6 +445,9 @@ export const {
   useHomeQuery,
   useQueueTopQuery,
   useKeepProductMutation,
+  useProductQuery,
+  useMarkProductReviewedMutation,
+  useRemoveProductMutation,
   useReviewCaseQuery,
   useAskRiderToFixBankMutation,
   useClaimMutation,
@@ -449,6 +479,7 @@ export const {
   useShopDisputesQuery,
   useRuleShopDisputeMutation,
   useProductsQuery,
+  useProductCategoriesQuery,
   useSetProductVisibilityMutation,
   useSetProductSponsoredMutation,
   useSellersQuery,

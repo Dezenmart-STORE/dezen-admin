@@ -218,7 +218,7 @@ export const shopOrder = z.object({
   createdAt: iso,
 });
 export const shopOrderDetail = shopOrder.extend({ timeline });
-export const shopDispute = z.object({ claim, id: z.string(), order: shopOrder, reason: z.string(), openedBy: z.enum(['buyer', 'seller']), openedAt: iso });
+export const shopDispute = z.object({ claim, id: z.string(), order: shopOrder, reason: z.string(), openedBy: z.enum(['buyer', 'seller', 'staff']), openedAt: iso });
 
 export const product = z.object({
   id: z.string(),
@@ -234,7 +234,43 @@ export const product = z.object({
   reportNotes: z.array(z.object({ text: z.string(), at: iso })).optional(),
   sponsored: z.boolean(),
   createdAt: iso,
+  reviewedAt: iso.optional(),
+  reviewedBy: z.string().optional(),
+  removed: z
+    .object({ reason: z.enum(['scam', 'not_allowed', 'misleading', 'photos', 'other']), message: z.string().min(20), by: z.string(), at: iso, heldOrders: z.number().int().nonnegative() })
+    .optional(),
+  hidden: z.object({ reason: z.string().min(3), by: z.string(), at: iso }).optional(),
+  changedAt: iso.optional(),
+  changes: z.array(z.string()).optional(),
+  fixedAt: iso.optional(),
+  needsLook: z.boolean(),
 });
+const snapshot = z.object({ name: z.string(), category: z.string(), price: z.number(), currency: z.string(), priceNgn: z.number(), stock: z.number(), description: z.string(), photos: z.number().int().nonnegative() });
+export const productDetail = product.extend({
+  description: z.string(),
+  photos: z.array(z.object({ id: z.string(), url: z.string().url().optional() })),
+  openOrders: z.number().int().nonnegative(),
+  history: z.array(
+    z.object({
+      kind: z.enum(['looked_over', 'kept', 'hidden', 'shown', 'removed']),
+      by: z.string(),
+      at: iso,
+      note: z.string().optional(),
+      checks: z.array(z.string()).optional(),
+      snapshot,
+    }),
+  ),
+  seller: z.object({
+    id: z.string(),
+    name: z.string(),
+    joinedAt: iso,
+    listed: z.number().int().nonnegative(),
+    removedBefore: z.number().int().nonnegative(),
+    ordersCompleted: z.number().int().nonnegative(),
+    disputes: z.number().int().nonnegative(),
+  }),
+});
+export const categories = z.array(z.object({ name: z.string().min(1), count: z.number().int().positive() }));
 export const seller = z.object({ id: z.string(), name: z.string(), products: z.number(), ordersCompleted: z.number(), disputes: z.number(), joinedAt: iso });
 
 export const person = z.object({ id: z.string(), name: z.string(), emailMasked: z.string(), isSeller: z.boolean(), isVendor: z.boolean(), isRider: z.boolean(), joinedAt: iso });

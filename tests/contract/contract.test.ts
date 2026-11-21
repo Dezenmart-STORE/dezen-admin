@@ -93,6 +93,30 @@ describe('reads: every screen gets the shape it expects', { timeout: 30_000 }, (
     const p = await read('/admin/shopping/products?status=reported', S.page(S.product));
     for (const x of p.items) expect(x.visible && x.reports > 0).toBe(true);
   });
+  it('listings to review are on sale, unreported and not looked over, and one opens', async () => {
+    const p = await read('/admin/shopping/products?status=review', S.page(S.product));
+    for (const x of p.items) expect(x.needsLook && !x.reports && !x.removed).toBe(true);
+    if (p.items[0]) await read(`/admin/shopping/products/${p.items[0].id}`, S.productDetail);
+  });
+  it('removed listings carry the notice the seller got, and only show under Removed', async () => {
+    const removed = await read('/admin/shopping/products?status=removed', S.page(S.product));
+    for (const x of removed.items) expect(x.removed).toBeDefined();
+    const all = await read('/admin/shopping/products', S.page(S.product));
+    for (const x of all.items) expect(x.removed).toBeUndefined();
+  });
+  it('products filter by category and sort by price', async () => {
+    const cats = await read('/admin/shopping/categories', S.categories);
+    const cat = cats[0]?.name;
+    if (cat) {
+      const p = await read(`/admin/shopping/products?category=${encodeURIComponent(cat)}`, S.page(S.product));
+      expect(p.total).toBe(cats[0].count);
+      for (const x of p.items) expect(x.category).toBe(cat);
+    }
+    for (const [sort, dir] of [['price_asc', 1], ['price_desc', -1]] as const) {
+      const p = await read(`/admin/shopping/products?sort=${sort}`, S.page(S.product));
+      for (let i = 1; i < p.items.length; i++) expect(Math.sign(p.items[i].priceNgn - p.items[i - 1].priceNgn) * dir).toBeGreaterThanOrEqual(0);
+    }
+  });
   it('sellers', () => read('/admin/shopping/sellers', S.page(S.seller)));
   it('people and one person with where they stand', async () => {
     const id = await firstId('/admin/platform/users', S.person);
@@ -126,6 +150,61 @@ describe('rules the backend must keep (sample backend only)', { timeout: 30_000 
     if (!w) return;
     const r = await call('POST', `/admin/express/withdrawals/${w.id}/retry`, { amount: w.amount }, CODE);
     expect(r.status).toBe(409);
+  });
+
+  writes('a listing cannot be marked fine without every check', async () => {
+    const id = await firstId('/admin/shopping/products?status=review', S.product);
+    const r = await call('POST', `/admin/shopping/products/${id}/reviewed`, { checks: ['photos'] });
+    expect(r.status).toBe(422);
+  });
+
+  writes('removing a listing needs a reason and a real message, then it is gone for good', async () => {
+    const id = await firstId('/admin/shopping/products?status=review', S.product);
+    expect((await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'scam', message: 'bad' })).status).toBe(422);
+    expect((await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'nope', message: 'This is long enough to send to a seller.' })).status).toBe(422);
+    expect((await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'scam', message: 'This is long enough to send to a seller.' })).status).toBe(200);
+    expect((await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'scam', message: 'This is long enough to send to a seller.' })).status).toBe(409);
+    expect((await call('POST', `/admin/shopping/products/${id}/show`, {})).status).toBe(409);
+  });
+
+  writes('a reported listing can only be kept through the checks, with a note', async () => {
+    const id = await firstId('/admin/shopping/products?status=reported', S.product);
+    if (!id) return;
+    expect((await call('POST', `/admin/shopping/products/${id}/keep`, { reason: 'fine' })).status).toBe(422);
+    const all = ['photos', 'details', 'price', 'allowed', 'brand'];
+    expect((await call('POST', `/admin/shopping/products/${id}/reviewed`, { checks: all })).status).toBe(422);
+    expect((await call('POST', `/admin/shopping/products/${id}/reviewed`, { checks: all, note: 'Checked with the seller' })).status).toBe(200);
+  });
+
+  writes('a hidden listing goes back on sale only through the checks', async () => {
+    const id = await firstId('/admin/shopping/products?status=hidden', S.product);
+    if (!id) return;
+    expect((await call('POST', `/admin/shopping/products/${id}/show`, {})).status).toBe(422);
+    const r = await call('POST', `/admin/shopping/products/${id}/reviewed`, { checks: ['photos', 'details', 'price', 'allowed', 'brand'] });
+    expect(r.status).toBe(200);
+    expect((await read(`/admin/shopping/products/${id}`, S.productDetail)).visible).toBe(true);
+  });
+
+  writes('removing a listing as a scam holds its paid orders as disputes for refunds', async () => {
+    // The sample's first listing has paid orders still in progress.
+    const id = 'pr0001';
+    const before = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    const disputesBefore = (await read('/admin/shopping/disputes', S.page(S.shopDispute))).total;
+    const r = await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'scam', message: 'These are copies sold as the real brand.' });
+    expect(r.status).toBe(200);
+    const after = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    expect(after.removed?.heldOrders).toBe(before.openOrders);
+    expect(after.history[0].kind).toBe('removed');
+    const disputes = await read('/admin/shopping/disputes', S.page(S.shopDispute));
+    expect(disputes.total).toBe(disputesBefore + before.openOrders);
+  });
+
+  writes('every decision keeps the listing as it was judged', async () => {
+    const id = await firstId('/admin/shopping/products?status=review', S.product);
+    await call('POST', `/admin/shopping/products/${id}/hide`, { reason: 'Use photos of the real item.' });
+    const d = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    expect(d.history[0].kind).toBe('hidden');
+    expect(d.history[0].snapshot.name).toBe(d.name);
   });
 
   writes('an owner cannot be removed', async () => {

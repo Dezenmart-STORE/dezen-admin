@@ -8,6 +8,7 @@ import type {
   Payment,
   PersonSummary,
   Product,
+  ProductDecision,
   ReconciliationRun,
   Rider,
   Seller,
@@ -246,6 +247,29 @@ const GOODS: [string, number, string][] = [
   ['Laptop backpack', 28, 'Accessories'],
   ['Adire tote bag', 15, 'Accessories'],
   ['Bluetooth speaker', 35, 'Electronics'],
+  // Newer listings nobody has looked at yet: two of them should not be on Dezenmart.
+  ['iPhone 15 Pro Max 256GB, brand new sealed', 60, 'Electronics'],
+  ['Designer handbag (first copy)', 40, 'Fashion'],
+  ['Hand-woven Aso Oke set', 55, 'Fashion'],
+  // Already taken down, kept on record with the notice the seller got.
+  ['Slimming tea: lose 10kg in 7 days', 12, 'Beauty'],
+];
+/** What each seller wrote under their product, by position in GOODS. */
+const ABOUT: string[] = [
+  'True wireless earbuds with charging case. Up to 5 hours play, 20 with the case. Comes boxed with a USB-C cable.',
+  'Six yards of 100% cotton Ankara, washed once so the colour holds. Pattern as in the photos.',
+  'Raw unrefined shea butter from Tamale, packed in a sealed tub.',
+  'Power bank, 20,000mAh, two USB ports and fast charging. Charges most phones four to five times.',
+  'Handmade leather sandals, sizes 38 to 45. Tell me your size after you order.',
+  'Smart watch with heart rate, steps and notifications. Works with Android and iPhone.',
+  'Three bars of black soap with a loofah. Good for skin that breaks out.',
+  'Water-resistant backpack that fits a 15.6 inch laptop, with a USB charging port.',
+  'Tote bag in hand-dyed adire, lined inside, with a zip pocket.',
+  'Portable speaker, 12 hours battery, splash-proof. Pairs in seconds.',
+  'Brand new sealed iPhone 15 Pro Max. Original from the US. Limited stock at this price, pay fast before it finishes. DM me on WhatsApp 0803 000 0000 for a better deal.',
+  'First copy of the famous designer bag, looks exactly like the original. Logo and dust bag included. Nobody will know the difference.',
+  'Complete Aso Oke set: gele, ipele and iro, woven by hand in Iseyin. Colours can be made to order in two weeks.',
+  'Drink one cup at night and lose up to 10kg in one week. 100% natural, no side effects, doctors recommend it.',
 ];
 const sellerPeople = people.filter((p) => p.isSeller);
 
@@ -253,7 +277,8 @@ const sellerPeople = people.filter((p) => p.isSeller);
 export const NGN_PER: Record<string, number> = { cUSD: 1560, USDT: 1560, USDC: 1560, cEUR: 1690, cREAL: 285, cKES: 12 };
 export const toNgn = (amount: number, currency: string) => (currency === 'NGN' ? amount : Math.round(amount * (NGN_PER[currency] ?? 0)));
 
-export const products: Product[] = GOODS.map(([n, price, category], i) => {
+/** Stored listings. Whether one needs a look is worked out when it is read. */
+export const products: Omit<Product, 'needsLook'>[] = GOODS.map(([n, price, category], i) => {
   const seller = sellerPeople[i % sellerPeople.length];
   const currency = pick(['cUSD', 'USDT']);
   return {
@@ -282,12 +307,59 @@ export const products: Product[] = GOODS.map(([n, price, category], i) => {
             ]
           : undefined,
     sponsored: i === 0,
-    createdAt: ago(int(20, 3000)),
+    // The newest listings are the ones nobody has looked at.
+    createdAt: i >= 10 ? ago(int(3, 40) + (i - 10) * 6) : ago(int(200, 3000)),
+    ...(i < 10 && ![3, 5, 6].includes(i) ? { reviewedAt: ago(int(48, 150)), reviewedBy: 'ops@dezenmart.com' } : {}),
+    // Looked over, then the seller swapped the photos and raised the price: it needs a look again.
+    ...(i === 4 ? { changedAt: ago(9), changes: ['photos', 'price'] } : {}),
+    // Hidden by staff; the seller says it is fixed. It stays hidden until someone looks again.
+    ...(i === 6
+      ? {
+          hidden: { reason: 'Your photos show a different brand of soap from the one you describe. Use photos of the soap you are selling.', by: 'ops@dezenmart.com', at: ago(70) },
+          fixedAt: ago(6),
+          changedAt: ago(6),
+          changes: ['photos', 'description'],
+        }
+      : {}),
+    ...(i === 13
+      ? {
+          visible: false,
+          removed: {
+            reason: 'scam' as const,
+            message: 'Your listing promised a weight loss no product can deliver and said doctors recommend it. Health claims like this are not allowed on Dezenmart.',
+            by: 'ops@dezenmart.com',
+            at: ago(30),
+            heldOrders: 0,
+          },
+        }
+      : {}),
   };
 });
 
+/** The words under each listing and how many photos it has, for the closer look. */
+export const productAbout: Record<string, { description: string; photos: number }> = Object.fromEntries(
+  products.map((p, i) => [p.id, { description: ABOUT[i] ?? '', photos: i === 11 ? 1 : 2 + (i % 3) }]),
+);
+
+/** Every staff decision on a listing, newest first, with the listing as it was then. */
+export const productHistory: Record<string, ProductDecision[]> = Object.fromEntries(
+  products.map((p, i) => {
+    const about = productAbout[p.id];
+    const snap = { name: p.name, category: p.category, price: p.price, currency: p.currency, priceNgn: p.priceNgn, stock: p.stock, description: about.description, photos: about.photos };
+    const out: ProductDecision[] = [];
+    if (p.reviewedAt) {
+      // The sandals were looked over at a lower price, with fewer photos, before the seller changed them.
+      const then = i === 4 ? { ...snap, price: 18, priceNgn: toNgn(18, p.currency), photos: snap.photos - 1 } : snap;
+      out.push({ kind: 'looked_over', by: p.reviewedBy ?? 'ops@dezenmart.com', at: p.reviewedAt, checks: ['photos', 'details', 'price', 'allowed', 'brand'], snapshot: then });
+    }
+    if (p.hidden) out.push({ kind: 'hidden', by: p.hidden.by, at: p.hidden.at, note: p.hidden.reason, snapshot: { ...snap, description: 'Natural black soap, three bars. Works for every skin type.', photos: 1 } });
+    if (p.removed) out.push({ kind: 'removed', by: p.removed.by, at: p.removed.at, note: p.removed.message, snapshot: snap });
+    return [p.id, out];
+  }),
+);
+
 export const shopOrders: ShopOrder[] = Array.from({ length: 30 }, (_, i) => {
-  const product = products[i % products.length];
+  const product = products[i % 10];
   const buyer = person();
   const quantity = int(1, 2);
   const status = i < 3 ? 'disputed' : pick(['pending', 'accepted', 'shipped', 'delivered', 'completed', 'completed']);
@@ -322,7 +394,7 @@ export const sellers: Seller[] = sellerPeople.map((p) => ({
   id: p.id,
   name: p.name,
   email: p.emailMasked,
-  products: products.filter((x) => x.seller.id === p.id).length,
+  products: products.filter((x) => x.seller.id === p.id && !x.removed).length,
   ordersCompleted: shopOrders.filter((o) => o.seller.id === p.id && o.status === 'completed').length,
   disputes: shopOrders.filter((o) => o.seller.id === p.id && o.status === 'disputed').length,
   joinedAt: p.joinedAt,

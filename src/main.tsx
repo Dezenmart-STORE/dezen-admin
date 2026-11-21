@@ -22,6 +22,7 @@ import { Providers } from './pages/express/Providers';
 import { ShopOrderDetail, ShopOrders } from './pages/shopping/Orders';
 import { ShopDisputes } from './pages/shopping/Disputes';
 import { Products, Sellers } from './pages/shopping/Products';
+import { ProductReview } from './pages/shopping/ProductReview';
 import { People, PersonDetail } from './pages/People';
 import { Payments, Reconciliation, Webhooks } from './pages/money/Money';
 import { Settings } from './pages/Settings';
@@ -86,6 +87,7 @@ createRoot(document.getElementById('root')!).render(
             {page('shopping/orders/:id', ['support', 'shopping'], <ShopOrderDetail />)}
             {page('shopping/disputes', ['support', 'shopping'], <ShopDisputes />)}
             {page('shopping/products', ['support', 'shopping'], <Products />)}
+            {page('shopping/products/:id', ['support', 'shopping'], <ProductReview />)}
             {page('shopping/sellers', ['support', 'shopping'], <Sellers />)}
             {page('money/payments', ['support', 'platform'], <Payments />)}
             {page('money/notices', ['support', 'platform'], <Webhooks />)}

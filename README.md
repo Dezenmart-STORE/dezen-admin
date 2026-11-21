@@ -55,7 +55,7 @@ Production builds must set `VITE_USE_SAMPLE_DATA=false`.
 | Home | Your shift: the one person to help next ("Take it"), the rest grouped by approve, pay, rule and review, the living mark (each shape grows with what its service owes; a red halo means someone is past our promise), and who was settled today |
 | DezenFoods | Orders (with full history), disputes (split rulings), vendors (each a case with photos and checks) |
 | DezenExpress | Trips (with refunds), rider withdrawals (grouped by what unsticks each one), riders and delivery companies (cases with photos and checks), wallet corrections |
-| Shopping | Orders, disputes (rulings wait for an owner), products (open on Reported, with buyers' words), sellers. Amounts in naira, coin amount as small print |
+| Shopping | Orders, disputes (rulings wait for an owner), products (open on Reported, with buyers' words; To review lists listings nobody has looked over; each listing opens for a closer look with five checks, then is kept, hidden until fixed, or removed for good with a notice to the seller. Every way back on sale goes through the checks; a seller's edit or fix sends it back to To review; removing a scam holds its paid orders as disputes for refunds; each decision keeps the listing as it was judged), sellers. Amounts in naira, coin amount as small print |
 | Money | Payments, payment notices (problems first), daily balance check (gap first, a streak of matching days) |
 | Dezenmart | People (where they stand first; masked details with a logged “show full details”), fees and fares (with a live preview), staff (owners protected), activity log (names, every action) |
 
@@ -81,7 +81,8 @@ Production builds must set `VITE_USE_SAMPLE_DATA=false`.
   - Money actions are refused while offline, and nothing is queued to send later.
   - "Turn on alerts" in the menu notifies you when an urgent queue grows while the admin is open. Alerts while it is closed need backend push (see the checklist).
 - **Accessibility:**
-  - Every text colour meets 4.5:1 contrast in both themes.
+  - Dark only, like the other Dezenmart sites, whatever the device is set to.
+  - Every text colour meets 4.5:1 contrast.
   - There is a skip link and visible focus, and status is never shown by colour alone.
   - Arrow keys work in filter chips.
   - Reduced motion is respected.

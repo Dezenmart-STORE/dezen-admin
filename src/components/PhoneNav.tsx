@@ -25,6 +25,7 @@ const RECORDS: { re: RegExp; title: string; back: string }[] = [
   { re: /^\/express\/riders\/[^/]+$/, title: 'Rider', back: '/express/riders' },
   { re: /^\/express\/providers\/[^/]+$/, title: 'Delivery company', back: '/express/providers' },
   { re: /^\/shopping\/orders\/[^/]+$/, title: 'Shopping order', back: '/shopping/orders' },
+  { re: /^\/shopping\/products\/[^/]+$/, title: 'Listing', back: '/shopping/products' },
   { re: /^\/people\/[^/]+$/, title: 'Person', back: '/people' },
 ];
 

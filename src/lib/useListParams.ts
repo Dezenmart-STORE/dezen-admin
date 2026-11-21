@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom';
  * A page that opens on a default view (Reported, Needs someone) writes `status=all` for "All",
  * since an empty status would fall back to the default.
  */
-export function useListParams(defaults: { status?: string } = {}) {
+export function useListParams<K extends string = never>(defaults: { status?: string } = {}, extras: readonly K[] = []) {
   const [params, setParams] = useSearchParams();
   const raw = params.get('status');
   const status = raw === 'all' ? '' : (raw ?? defaults.status ?? '');
@@ -21,5 +21,8 @@ export function useListParams(defaults: { status?: string } = {}) {
     if (!('page' in changes)) next.delete('page');
     setParams(next, { replace: true });
   };
-  return { status, q, page, set, args: { status: status || undefined, q: q || undefined, page } };
+  // Further filters a page offers (category, sort): read from the address, sent to the backend as they are.
+  const extra = Object.fromEntries(extras.map((k) => [k, params.get(k) ?? ''])) as Record<K, string>;
+  const extraArgs = Object.fromEntries(extras.map((k) => [k, params.get(k) || undefined])) as Partial<Record<K, string>>;
+  return { status, q, page, set, extra, args: { status: status || undefined, q: q || undefined, page, ...extraArgs } };
 }

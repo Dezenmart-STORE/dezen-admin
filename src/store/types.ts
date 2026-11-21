@@ -432,7 +432,8 @@ export interface ShopDispute {
   id: string;
   order: ShopOrder;
   reason: string;
-  openedBy: 'buyer' | 'seller';
+  /** Staff open one for each paid order when a listing is removed as a scam, so the buyer can be refunded. */
+  openedBy: 'buyer' | 'seller' | 'staff';
   openedAt: string;
   /** A ruling staff made, waiting for an owner to carry it out. */
   ruling?: { resolution: 'refund_buyer' | 'release_to_seller'; by: string; at: string; note: string; carriedOut: boolean };
@@ -455,6 +456,80 @@ export interface Product {
   reportNotes?: { text: string; at: string }[];
   sponsored: boolean;
   createdAt: string;
+  /** Set once a staff member has looked the listing over and found nothing wrong. */
+  reviewedAt?: string;
+  reviewedBy?: string;
+  /** Set when staff took it off Dezenmart for good. It stays on record so the notice can be read back. */
+  removed?: ProductRemoval;
+  /** Set while staff have hidden it; the seller sees the reason and can fix the listing. */
+  hidden?: { reason: string; by: string; at: string };
+  /** The seller changed the listing after staff last looked at it. A change sends it back to "To review". */
+  changedAt?: string;
+  /** What they changed: 'photos', 'name', 'description', 'price', 'category'. */
+  changes?: string[];
+  /** The seller says a hidden listing is fixed. It stays hidden until staff look again. */
+  fixedAt?: string;
+  /** True when staff must look at it: never looked over, changed since, reported, or fixed after hiding. */
+  needsLook: boolean;
+}
+
+/** The listing as staff saw it when they decided, so later edits can't rewrite what was judged. */
+export interface ListingSnapshot {
+  name: string;
+  category: string;
+  price: number;
+  currency: string;
+  priceNgn: number;
+  stock: number;
+  description: string;
+  photos: number;
+}
+
+export interface ProductDecision {
+  kind: 'looked_over' | 'kept' | 'hidden' | 'shown' | 'removed';
+  by: string;
+  at: string;
+  /** The reason or note given, if any. */
+  note?: string;
+  /** The checks ticked, by id. */
+  checks?: string[];
+  snapshot: ListingSnapshot;
+}
+
+/** Why a listing was taken down. The seller sees the reason's words and the message. */
+export type RemovalReason = 'scam' | 'not_allowed' | 'misleading' | 'photos' | 'other';
+
+export interface ProductRemoval {
+  reason: RemovalReason;
+  /** The notice the seller received, exactly as sent. */
+  message: string;
+  by: string;
+  at: string;
+  /** Paid orders put on hold and opened as disputes, so their buyers can be refunded. */
+  heldOrders: number;
+}
+
+/** One listing, opened for a closer look. */
+export interface ProductDetail extends Product {
+  /** What the seller wrote under the product. */
+  description: string;
+  /** The seller's photos. `url` is a short-lived link the backend signs; missing means no image to show. */
+  photos: { id: string; url?: string }[];
+  /** Paid orders still in progress. Removed as a scam or not allowed, they are held for refunds; otherwise they carry on. */
+  openOrders: number;
+  /** Every staff decision on it, newest first, each with the listing as it was then. */
+  history: ProductDecision[];
+  seller: {
+    id: string;
+    name: string;
+    joinedAt: string;
+    /** Their other listings still on sale. */
+    listed: number;
+    /** Listings of theirs staff have removed before. */
+    removedBefore: number;
+    ordersCompleted: number;
+    disputes: number;
+  };
 }
 
 export interface Seller {

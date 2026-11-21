@@ -7,6 +7,8 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
   className?: string;
   align?: 'right';
+  /** The list's sort keys for this column, low-to-high first. Makes the header a sort button. */
+  sort?: [asc: string, desc: string];
 }
 
 /** How a row reads on a phone: two lines on the left, amount and status on the right. */
@@ -33,6 +35,8 @@ export function Table<T>({
   settledWhenEmpty,
   href,
   mobile,
+  sort,
+  onSort,
 }: {
   rows: T[] | undefined;
   columns: Column<T>[];
@@ -45,6 +49,9 @@ export function Table<T>({
   settledWhenEmpty?: boolean;
   href?: (row: T) => string;
   mobile?: (row: T) => MobileRow;
+  /** The sort key the list is in now, and how to change it (for columns with `sort`). */
+  sort?: string;
+  onSort?: (key: string) => void;
 }) {
   const navigate = useNavigate();
   if (error) return <ErrorNote>{error}</ErrorNote>;
@@ -94,15 +101,34 @@ export function Table<T>({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left">
-                  {columns.map((c) => (
-                    <th
-                      key={c.header}
-                      scope="col"
-                      className={`whitespace-nowrap px-4 py-3 text-[12px] font-medium text-ink-3 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}
-                    >
-                      {c.header || <span className="sr-only">Actions</span>}
-                    </th>
-                  ))}
+                  {columns.map((c) => {
+                    const dir = c.sort && sort === c.sort[0] ? 'ascending' : c.sort && sort === c.sort[1] ? 'descending' : undefined;
+                    return (
+                      <th
+                        key={c.header}
+                        scope="col"
+                        aria-sort={dir}
+                        className={`whitespace-nowrap px-4 py-3 text-[12px] font-medium text-ink-3 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}
+                      >
+                        {c.sort && onSort ? (
+                          // First click sorts low to high; the next click flips it.
+                          <button
+                            type="button"
+                            onClick={() => onSort(dir === 'ascending' ? c.sort![1] : c.sort![0])}
+                            className={`inline-flex cursor-pointer items-center gap-1 hover:text-ink ${dir ? 'text-ink' : ''}`}
+                            title={`Sort by ${c.header.toLowerCase()}`}
+                          >
+                            {c.header}
+                            <span aria-hidden className={`font-mono text-[11px] ${dir ? '' : 'opacity-40'}`}>
+                              {dir === 'ascending' ? '↑' : dir === 'descending' ? '↓' : '↕'}
+                            </span>
+                          </button>
+                        ) : (
+                          c.header || <span className="sr-only">Actions</span>
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
