@@ -471,6 +471,19 @@ export interface Product {
   fixedAt?: string;
   /** True when staff must look at it: never looked over, changed since, reported, or fixed after hiding. */
   needsLook: boolean;
+  /** What the backend spotted on its own: phone numbers, words for fakes, a price far below the usual. */
+  flags: ListingFlag[];
+}
+
+/** The five checks, by id. */
+export type ReviewCheck = 'photos' | 'details' | 'price' | 'allowed' | 'brand';
+
+/** Something about a listing worth a closer look, found without a person: which check it bears on, and the likely reason. */
+export interface ListingFlag {
+  id: string;
+  text: string;
+  check: ReviewCheck;
+  reason: RemovalReason;
 }
 
 /** The listing as staff saw it when they decided, so later edits can't rewrite what was judged. */
@@ -486,13 +499,15 @@ export interface ListingSnapshot {
 }
 
 export interface ProductDecision {
-  kind: 'looked_over' | 'kept' | 'hidden' | 'shown' | 'removed';
+  kind: 'looked_over' | 'kept' | 'hidden' | 'shown' | 'removed' | 'restored';
   by: string;
   at: string;
   /** The reason or note given, if any. */
   note?: string;
   /** The checks ticked, by id. */
   checks?: string[];
+  /** The buyers who reported it, told the outcome. */
+  told?: { count: number; message: string };
   snapshot: ListingSnapshot;
 }
 
@@ -507,6 +522,8 @@ export interface ProductRemoval {
   at: string;
   /** Paid orders put on hold and opened as disputes, so their buyers can be refunded. */
   heldOrders: number;
+  /** The seller was also stopped from listing, and this many of their other listings were hidden. */
+  stoppedSeller?: { hiddenListings: number };
 }
 
 /** One listing, opened for a closer look. */
@@ -529,6 +546,13 @@ export interface ProductDetail extends Product {
     removedBefore: number;
     ordersCompleted: number;
     disputes: number;
+    /** Set while the seller is stopped from listing. Only an owner can let them list again. */
+    stopped?: { reason: string; by: string; at: string };
+  };
+  /** What to look for in this category, per check, and the usual price for this kind of item if known. */
+  guide: {
+    checks: Partial<Record<ReviewCheck, string>>;
+    price?: { item: string; low: number; high: number };
   };
 }
 

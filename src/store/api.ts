@@ -338,9 +338,19 @@ export const api = createApi({
       invalidatesTags: ['Products', 'Queues', 'Audit', 'ShopDisputes'],
     }),
     /** Takes the listing off Dezenmart for good and sends the seller the notice. Paid orders carry on. */
-    removeProduct: b.mutation<unknown, { id: string; reason: RemovalReason; message: string }>({
+    removeProduct: b.mutation<unknown, { id: string; reason: RemovalReason; message: string; stopSeller?: boolean }>({
       query: ({ id, ...body }) => ({ url: `/admin/shopping/products/${id}/remove`, method: 'POST', body }),
       invalidatesTags: ['Products', 'Queues', 'Audit', 'ShopDisputes', 'ShopOrders'],
+    }),
+    /** An owner undoes a removal. It comes back hidden, in "To review", so it is checked before it goes on sale. */
+    restoreProduct: b.mutation<unknown, { id: string; reason: string }>({
+      query: ({ id, reason }) => ({ url: `/admin/shopping/products/${id}/restore`, method: 'POST', body: { reason } }),
+      invalidatesTags: ['Products', 'Queues', 'Audit'],
+    }),
+    /** An owner lets a stopped seller list again. Their hidden listings stay hidden until each is looked at. */
+    allowSeller: b.mutation<unknown, { sellerId: string; reason: string }>({
+      query: ({ sellerId, reason }) => ({ url: `/admin/shopping/sellers/${sellerId}/allow`, method: 'POST', body: { reason } }),
+      invalidatesTags: ['Products', 'Audit'],
     }),
     keepProduct: b.mutation<unknown, { id: string; reason: string }>({
       query: ({ id, reason }) => ({ url: `/admin/shopping/products/${id}/keep`, method: 'POST', body: { reason } }),
@@ -479,7 +489,10 @@ export const {
   useShopDisputesQuery,
   useRuleShopDisputeMutation,
   useProductsQuery,
+  useLazyProductsQuery,
   useProductCategoriesQuery,
+  useRestoreProductMutation,
+  useAllowSellerMutation,
   useSetProductVisibilityMutation,
   useSetProductSponsoredMutation,
   useSellersQuery,

@@ -1,5 +1,5 @@
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, MoneyReceipt, ProductDecision, QueueItem, QueueKey, QueueTop, ReviewCase, ReviewKind, Withdrawal, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
+import type { Approval, AuditEvent, Capability, Claim, ClaimKind, HomeData, HomeGroup, HomeNext, HomeRow, ListingFlag, MoneyReceipt, ProductDecision, ProductRemoval, QueueItem, QueueKey, QueueTop, ReviewCase, ReviewKind, Withdrawal, SearchResult, Service, Settings, TimelineEntry } from '../store/types';
 import * as db from './data';
 
 /**
@@ -104,7 +104,77 @@ type StoredProduct = (typeof db.products)[number];
 /** A listing needs a look when it was never looked over, changed since, or the seller says a hidden one is fixed. */
 const needsLook = (p: StoredProduct) =>
   !p.removed && (p.reports > 0 || (p.visible ? !p.reviewedAt || (!!p.changedAt && p.changedAt > p.reviewedAt) : !!p.fixedAt));
-const listing = (p: StoredProduct) => ({ ...p, needsLook: needsLook(p) });
+/**
+ * The usual naira price for kinds of item staff see often, so "is this believable?" has a number to
+ * compare with. The real backend keeps this as a table staff can edit.
+ */
+const PRICE_GUIDE: { match: RegExp; item: string; low: number; high: number }[] = [
+  { match: /iphone 15 pro max/i, item: 'an iPhone 15 Pro Max', low: 1_500_000, high: 2_300_000 },
+  { match: /earbuds/i, item: 'wireless earbuds', low: 15_000, high: 60_000 },
+  { match: /power bank/i, item: 'a 20,000mAh power bank', low: 18_000, high: 45_000 },
+  { match: /smart watch/i, item: 'a smart watch', low: 25_000, high: 120_000 },
+  { match: /speaker/i, item: 'a bluetooth speaker', low: 20_000, high: 90_000 },
+  { match: /sandals/i, item: 'leather sandals', low: 15_000, high: 45_000 },
+  { match: /ankara/i, item: '6 yards of Ankara', low: 12_000, high: 40_000 },
+  { match: /shea butter/i, item: '500g of shea butter', low: 4_000, high: 12_000 },
+  { match: /black soap/i, item: 'a black soap set', low: 5_000, high: 15_000 },
+  { match: /backpack/i, item: 'a laptop backpack', low: 20_000, high: 60_000 },
+  { match: /tote/i, item: 'an adire tote bag', low: 10_000, high: 30_000 },
+  { match: /aso oke/i, item: 'an Aso Oke set', low: 60_000, high: 250_000 },
+];
+/** What to look for, per category and check. The real backend keeps this as rules staff can edit. */
+const CATEGORY_GUIDE: Record<string, Partial<Record<string, string>>> = {
+  Electronics: {
+    details: 'Brand and model match the photos and the box. For phones: storage, and whether it is new or used.',
+    allowed: 'No cloned phones, and nothing used sold as “brand new sealed”.',
+  },
+  Beauty: {
+    details: 'The size or weight matches the pack in the photos.',
+    allowed: 'Needs a NAFDAC number on the pack. No medicines, and no promises to cure, whiten or slim.',
+  },
+  Fashion: {
+    details: 'Sizes and material are stated.',
+    allowed: 'No “first copy”, replica, or designer logos on goods that are not that brand.',
+  },
+  Accessories: { allowed: 'No designer logos on goods that are not that brand.' },
+};
+const priceGuideOf = (p: StoredProduct) => PRICE_GUIDE.find((g) => g.match.test(p.name));
+/**
+ * Spots what a reviewer should not miss, before a person opens the listing. Each flag says which check
+ * it bears on and the likely removal reason, so the screen can point straight at it.
+ */
+const flagsOf = (p: StoredProduct): ListingFlag[] => {
+  const text = `${p.name} ${db.productAbout[p.id]?.description ?? ''}`;
+  const out: ListingFlag[] = [];
+  if (/(\+?234|\b0)[789][01]\d[\s-]?\d{3}[\s-]?\d{4}/.test(text) || /\b(whats ?app|telegram|dm me|call me|chat me)\b/i.test(text))
+    out.push({ id: 'contact', text: 'Asks buyers to get in touch outside Dezenmart (a phone number or WhatsApp)', check: 'brand', reason: 'scam' });
+  if (/(https?:\/\/|www\.)/i.test(text)) out.push({ id: 'link', text: 'Links to another website', check: 'brand', reason: 'scam' });
+  const copy = text.match(/\b(first copy|1st copy|replica|master copy|mirror quality|aaa quality|original copy)\b/i);
+  if (copy) out.push({ id: 'copy', text: `Uses “${copy[1].toLowerCase()}”, which means a copy of a branded item`, check: 'allowed', reason: 'not_allowed' });
+  if (/(lose \d+\s?kg|\bcures?\b|doctors? recommend|no side effects?)/i.test(text))
+    out.push({ id: 'health', text: 'Makes a health promise', check: 'allowed', reason: 'not_allowed' });
+  if (/(pay fast|before it finishes|limited stock at this price)/i.test(text))
+    out.push({ id: 'rush', text: 'Pushes buyers to pay fast', check: 'details', reason: 'scam' });
+  const g = priceGuideOf(p);
+  if (g && p.priceNgn < g.low * 0.5)
+    out.push({ id: 'price', text: `Priced ${Math.round((1 - p.priceNgn / g.low) * 100)}% below the lowest usual price for ${g.item}`, check: 'price', reason: 'scam' });
+  return out;
+};
+const listing = (p: StoredProduct) => ({ ...p, needsLook: needsLook(p), flags: p.removed ? [] : flagsOf(p) });
+/** Sellers stopped from listing, by seller id. */
+const sellerStops: Record<string, { reason: string; by: string; at: string }> = {};
+/** What the buyers who reported a listing are told, once staff decide. */
+const tellReporters = (p: StoredProduct, outcome: 'kept' | 'hidden' | 'removed') =>
+  p.reports > 0
+    ? {
+        count: p.reports,
+        message: {
+          kept: `We checked “${p.name}” and it meets our rules, so it stays on sale. Thank you for telling us.`,
+          hidden: `We’ve taken “${p.name}” off sale while the seller fixes it. Thank you for telling us.`,
+          removed: `We’ve removed “${p.name}” from Dezenmart. Thank you for telling us.`,
+        }[outcome],
+      }
+    : undefined;
 /** The listings in one view (tab) of the Products page, before category, search and sort. */
 const productsIn = (status?: string) => {
   // Removed listings only show under "Removed"; every other view is what is still on record for sale.
@@ -129,17 +199,19 @@ const PRODUCT_SORTS: Record<string, (a: StoredProduct, b: StoredProduct) => numb
   waiting: (a, b) => firstReport(a).localeCompare(firstReport(b)),
   // The seller's latest change counts as when it joined the queue.
   queued: (a, b) => (a.changedAt ?? a.createdAt).localeCompare(b.changedAt ?? b.createdAt),
+  // Most flags first, so the likely scams are looked at before the clean listings.
+  risk: (a, b) => flagsOf(b).length - flagsOf(a).length || (a.changedAt ?? a.createdAt).localeCompare(b.changedAt ?? b.createdAt),
   removed_newest: (a, b) => (b.removed?.at ?? '').localeCompare(a.removed?.at ?? ''),
 };
 /** Each view's own order when staff have not picked one. */
-const DEFAULT_SORT: Record<string, string> = { reported: 'waiting', review: 'queued', removed: 'removed_newest', hidden: 'newest', '': 'newest' };
+const DEFAULT_SORT: Record<string, string> = { reported: 'waiting', review: 'risk', removed: 'removed_newest', hidden: 'newest', '': 'newest' };
 const openOrdersOf = (productId: string) => db.shopOrders.filter((o) => o.product.id === productId && o.held && o.status !== 'disputed');
 const needAllChecks = (req: Req) => {
   const checks = Array.isArray(req.body.checks) ? (req.body.checks as string[]) : [];
   if (PRODUCT_CHECKS.some((c) => !checks.includes(c))) throw new Fail(422, 'Tick every check first');
 };
 /** Every decision keeps the listing as staff saw it, so a later edit can't change what was judged. */
-const decide = (p: StoredProduct, kind: ProductDecision['kind'], note?: string, checks?: string[]) => {
+const decide = (p: StoredProduct, kind: ProductDecision['kind'], note?: string, checks?: string[], told?: ProductDecision['told']) => {
   const about = db.productAbout[p.id] ?? { description: '', photos: 0 };
   (db.productHistory[p.id] ??= []).unshift({
     kind,
@@ -147,6 +219,7 @@ const decide = (p: StoredProduct, kind: ProductDecision['kind'], note?: string, 
     at: now(),
     note,
     checks,
+    told,
     snapshot: { name: p.name, category: p.category, price: p.price, currency: p.currency, priceNgn: p.priceNgn, stock: p.stock, description: about.description, photos: about.photos },
   });
 };
@@ -1078,6 +1151,13 @@ const routes: Route[] = [
         photos: Array.from({ length: about.photos }, (_, i) => ({ id: `${p.id}-ph${i + 1}` })),
         openOrders: openOrdersOf(p.id).length,
         history: db.productHistory[p.id] ?? [],
+        guide: {
+          checks: CATEGORY_GUIDE[p.category] ?? {},
+          price: (() => {
+            const g = priceGuideOf(p);
+            return g ? { item: g.item, low: g.low, high: g.high } : undefined;
+          })(),
+        },
         seller: {
           id: p.seller.id,
           name: p.seller.name,
@@ -1086,6 +1166,7 @@ const routes: Route[] = [
           removedBefore: theirs.filter((x) => x.id !== p.id && x.removed).length,
           ordersCompleted: seller?.ordersCompleted ?? 0,
           disputes: seller?.disputes ?? 0,
+          stopped: sellerStops[p.seller.id],
         },
       });
     },
@@ -1106,8 +1187,9 @@ const routes: Route[] = [
       needAllChecks(req);
       const note = String(req.body.note ?? '').trim();
       if (p.reports > 0 && note.length < 3) throw new Fail(422, 'Say why the reports did not hold up');
+      if (sellerStops[p.seller.id]) throw new Fail(409, 'This seller is stopped from listing. An owner must let them list again first');
       const kind = !p.visible ? 'shown' : p.reports > 0 ? 'kept' : 'looked_over';
-      decide(p, kind, note || undefined, req.body.checks as string[]);
+      decide(p, kind, note || undefined, req.body.checks as string[], tellReporters(p, 'kept'));
       p.reports = 0;
       p.reportNotes = undefined;
       p.visible = true;
@@ -1145,11 +1227,56 @@ const routes: Route[] = [
           openedAt: now(),
         });
       }
-      decide(p, 'removed', message);
+      decide(p, 'removed', message, undefined, tellReporters(p, 'removed'));
+      // A seller caught once may relist in minutes: staff can stop them listing and hide what else they have on sale.
+      let stoppedSeller: ProductRemoval['stoppedSeller'];
+      if (req.body.stopSeller && !sellerStops[p.seller.id]) {
+        sellerStops[p.seller.id] = { reason: `Listing “${p.name}” removed: ${REMOVAL_WORDS[reason].toLowerCase()}`, by: EMAIL, at: now() };
+        const others = db.products.filter((x) => x.seller.id === p.seller.id && x.id !== p.id && !x.removed && x.visible);
+        for (const x of others) {
+          decide(x, 'hidden', 'The seller was stopped from listing after another listing was removed.');
+          x.visible = false;
+          x.sponsored = false;
+          x.hidden = { reason: 'Your account can’t list on Dezenmart for now, so this listing is hidden. We’ve sent you the reason.', by: EMAIL, at: now() };
+        }
+        stoppedSeller = { hiddenListings: others.length };
+      }
       p.visible = false;
       p.sponsored = false;
-      p.removed = { reason: reason as never, message, by: EMAIL, at: now(), heldOrders: held.length };
+      p.reports = 0;
+      p.reportNotes = undefined;
+      p.removed = { reason: reason as never, message, by: EMAIL, at: now(), heldOrders: held.length, stoppedSeller };
       return ok(listing(p));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/shopping\/products\/([^/]+)\/restore$/,
+    needs: ['staff_admin', 'shopping'],
+    log: (r) => `Undid the removal of ${db.products.find((p) => p.id === r.match[1])?.name}`,
+    handle: (req) => {
+      const p = find(db.products, req.match[1], 'Product');
+      if (!p.removed) throw new Fail(409, 'This listing is not removed');
+      const reason = needReason(req);
+      decide(p, 'restored', reason);
+      // Back as hidden and waiting for a look, so nothing goes on sale without the checks.
+      p.removed = undefined;
+      p.visible = false;
+      p.hidden = { reason: 'We took a second look at the removal and undid it. We’ll check the listing again before it goes back on sale.', by: EMAIL, at: now() };
+      p.fixedAt = now();
+      return ok(listing(p));
+    },
+  },
+  {
+    method: 'POST',
+    path: /^\/admin\/shopping\/sellers\/([^/]+)\/allow$/,
+    needs: ['staff_admin', 'shopping'],
+    log: (r) => `Let ${db.sellers.find((s) => s.id === r.match[1])?.name} list again`,
+    handle: (req) => {
+      if (!sellerStops[req.match[1]]) throw new Fail(409, 'This seller is not stopped');
+      needReason(req);
+      delete sellerStops[req.match[1]];
+      return ok(null);
     },
   },
   {
@@ -1161,7 +1288,9 @@ const routes: Route[] = [
       const p = find(db.products, req.match[1], 'Product');
       if (p.removed) throw new Fail(409, 'This listing has already been removed');
       const reason = needReason(req);
-      decide(p, 'hidden', reason);
+      decide(p, 'hidden', reason, undefined, tellReporters(p, 'hidden'));
+      p.reports = 0;
+      p.reportNotes = undefined;
       p.visible = false;
       p.sponsored = false;
       p.hidden = { reason, by: EMAIL, at: now() };

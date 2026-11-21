@@ -4,21 +4,53 @@ import { FiArrowLeft, FiCheck } from 'react-icons/fi';
 import { errorMessage, failureOf } from '../../lib/errors';
 import { formatDate } from '../../lib/format';
 import { useCan } from '../../store';
-import { useMarkProductReviewedMutation, useProductQuery, useRemoveProductMutation, useSetProductVisibilityMutation } from '../../store/api';
-import type { ListingSnapshot, ProductDecision, ProductDetail, RemovalReason } from '../../store/types';
+import {
+  useAllowSellerMutation,
+  useLazyProductsQuery,
+  useMarkProductReviewedMutation,
+  useProductQuery,
+  useRemoveProductMutation,
+  useRestoreProductMutation,
+  useSetProductVisibilityMutation,
+} from '../../store/api';
+import type { ListingSnapshot, ProductDecision, ProductDetail, RemovalReason, ReviewCheck } from '../../store/types';
 import { ServiceGlyph, StatusShape } from '../../components/brand';
 import { ConfirmDialog, Dialog } from '../../components/Dialog';
 import { WHO } from '../../components/Choice';
 import { Button, Card, ErrorNote, Field, Loading, Money, SectionTitle, Status, moneyWords } from '../../components/ui';
 
-/** What a reviewer confirms before calling a listing fine. The backend checks the same ids. */
-const CHECKS: { id: string; label: string; hint: (p: ProductDetail) => string }[] = [
-  { id: 'photos', label: 'The photos show the real item', hint: () => 'Not stock pictures, screenshots or photos taken from another shop.' },
-  { id: 'details', label: 'The name and description match the photos', hint: () => 'Same item, same brand, same size or quantity.' },
-  { id: 'price', label: 'The price is believable', hint: (p) => `Listed at ${moneyWords(p.price, p.currency, p.priceNgn)}. Far below the usual price is a common sign of a scam.` },
-  { id: 'allowed', label: 'It is allowed on Dezenmart', hint: () => 'No fakes or copies, weapons, drugs, medicines or health promises.' },
-  { id: 'brand', label: 'It looks right on Dezenmart', hint: () => 'No phone numbers or links to deal elsewhere, no watermarks, nothing explicit or offensive.' },
+const naira = (n: number) => `₦${n.toLocaleString('en-NG')}`;
+
+/**
+ * What a reviewer confirms before calling a listing fine. The backend checks the same ids. Each check also
+ * shows what to look for in this listing's category, and the price check shows the usual price when known.
+ */
+const CHECKS: { id: ReviewCheck; label: string; hint: (p: ProductDetail) => string; fails: RemovalReason }[] = [
+  { id: 'photos', label: 'The photos show the real item', hint: () => 'Not stock pictures, screenshots or photos taken from another shop.', fails: 'photos' },
+  { id: 'details', label: 'The name and description match the photos', hint: () => 'Same item, same brand, same size or quantity.', fails: 'misleading' },
+  {
+    id: 'price',
+    label: 'The price is believable',
+    hint: (p) =>
+      p.guide.price
+        ? `Listed at ${moneyWords(p.price, p.currency, p.priceNgn)}. Usually ${naira(p.guide.price.low)} to ${naira(p.guide.price.high)} for ${p.guide.price.item}.`
+        : `Listed at ${moneyWords(p.price, p.currency, p.priceNgn)}. Far below the usual price is a common sign of a scam.`,
+    fails: 'scam',
+  },
+  { id: 'allowed', label: 'It is allowed on Dezenmart', hint: () => 'No fakes or copies, weapons, drugs, medicines or health promises.', fails: 'not_allowed' },
+  { id: 'brand', label: 'It looks right on Dezenmart', hint: () => 'No phone numbers or links to deal elsewhere, no watermarks, nothing explicit or offensive.', fails: 'photos' },
 ];
+
+/**
+ * The removal reason the screen suggests: what the flags point at first, then the first check a reviewer
+ * left unticked after ticking others. Staff can always change it.
+ */
+const suggestReason = (p: ProductDetail, ticked: Set<string>): { reason: RemovalReason; why: string } | null => {
+  if (p.flags[0]) return { reason: p.flags[0].reason, why: 'Picked from what was flagged.' };
+  const unticked = CHECKS.find((c) => !ticked.has(c.id));
+  if (ticked.size > 0 && unticked) return { reason: unticked.fails, why: `Picked because “${unticked.label.toLowerCase()}” is not ticked.` };
+  return null;
+};
 
 /** The reasons a seller can be given, with a first draft of the message that staff can change. */
 /** Reasons that put buyers who already paid at risk: their orders are held and refunded, not paid out. */
@@ -64,10 +96,14 @@ function Listing({ p }: { p: ProductDetail }) {
   const navigate = useNavigate();
   const mayDecide = can('verify', 'shopping');
   const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [sheet, setSheet] = useState<'hide' | 'remove' | 'keep' | null>(null);
+  const [sheet, setSheet] = useState<'hide' | 'remove' | 'keep' | 'allow' | null>(null);
   const [fineError, setFineError] = useState('');
   const [markReviewed, marking] = useMarkProductReviewedMutation();
   const [setVisible] = useSetProductVisibilityMutation();
+  const [loadQueue] = useLazyProductsQuery();
+  const [allowSeller] = useAllowSellerMutation();
+  const isOwner = can('staff_admin', 'shopping');
+  const stopped = p.seller.stopped;
   useEffect(() => setTicked(new Set()), [p.id]);
 
   const removed = !!p.removed;
@@ -76,13 +112,17 @@ function Listing({ p }: { p: ProductDetail }) {
   const all = CHECKS.length;
   const reported = p.reports > 0 && p.visible;
   const fixed = !p.visible && !!p.fixedAt;
+  // Back from a removal an owner undid, not from the seller fixing it.
+  const restored = fixed && p.history[0]?.kind === 'restored';
   const changed = p.visible && !reported && !!p.changedAt && p.needsLook && !!p.reviewedAt;
   const open = p.needsLook || !p.visible;
   const state = removed
     ? 'Removed listing'
     : reported
       ? 'Reported listing'
-      : fixed
+      : restored
+        ? 'Hidden · removal undone, to check again'
+        : fixed
         ? 'Hidden · the seller says it’s fixed'
         : !p.visible
           ? 'Hidden listing'
@@ -93,7 +133,15 @@ function Listing({ p }: { p: ProductDetail }) {
               : 'Listing';
   // What the main button does, said plainly. Every path that clears a listing goes through the checks.
   const clearLabel = reported ? 'Reports don’t hold up, keep it' : !p.visible ? 'It’s fixed, put it back on sale' : 'It’s fine, keep it on sale';
-  const backTo = reported ? '/shopping/products?status=reported' : '/shopping/products?status=review';
+  const queue = reported ? 'reported' : 'review';
+  const backTo = `/shopping/products?status=${queue}`;
+  /** After a decision, open the next listing in the same queue, so a reviewer never hunts for it. */
+  const goNext = async () => {
+    const next = await loadQueue({ status: queue, page: 1 }).unwrap().catch(() => null);
+    const id = next?.items.find((x) => x.id !== p.id)?.id;
+    navigate(id ? `/shopping/products/${id}` : backTo);
+  };
+  const flaggedChecks = new Set(p.flags.map((f) => f.check));
 
   const toggle = (id: string) =>
     setTicked((t) => {
@@ -105,7 +153,7 @@ function Listing({ p }: { p: ProductDetail }) {
   const clear = async (note?: string) => {
     setFineError('');
     const failure = failureOf(await markReviewed({ id: p.id, checks: [...ticked], note }));
-    if (!failure) navigate(backTo);
+    if (!failure) await goNext();
     return failure;
   };
   // Clearing buyer reports needs a word on why, kept for staff; everything else clears straight away.
@@ -136,11 +184,16 @@ function Listing({ p }: { p: ProductDetail }) {
         {(changed || fixed) && (
           <div className="mt-4 max-w-[68ch] rounded-leaf-sm border border-waiting/40 bg-waiting/[0.08] px-4 py-3 text-[14px]">
             <p className="font-semibold">
-              {fixed ? `${sellerFirst} says it’s fixed` : `${sellerFirst} changed it after it was looked over`}
-              {p.changes?.length ? `: new ${listWords(p.changes)}` : ''}
-              {p.changedAt ? ` · ${formatDate(p.changedAt)}` : ''}
+              {restored
+                ? `${p.history[0].by} undid the removal · ${formatDate(p.history[0].at)}`
+                : fixed
+                  ? `${sellerFirst} says it’s fixed`
+                  : `${sellerFirst} changed it after it was looked over`}
+              {!restored && p.changes?.length ? `: new ${listWords(p.changes)}` : ''}
+              {!restored && p.changedAt ? ` · ${formatDate(p.changedAt)}` : ''}
             </p>
-            {fixed && p.hidden && <p className="mt-1 text-ink-2">It was hidden because: “{p.hidden.reason}”</p>}
+            {restored && p.history[0].note && <p className="mt-1 text-ink-2">Why: “{p.history[0].note}”</p>}
+            {fixed && !restored && p.hidden && <p className="mt-1 text-ink-2">It was hidden because: “{p.hidden.reason}”</p>}
             <p className="mt-1 text-ink-2">
               Compare it with what staff saw last time, under “What staff decided”. It {fixed ? 'stays hidden' : 'needs the checks again'} until someone looks.
             </p>
@@ -233,6 +286,34 @@ function Listing({ p }: { p: ProductDetail }) {
             <RemovedNotice p={p} />
           ) : (
             <>
+              {p.flags.length > 0 && (
+                <div className="mb-5 rounded-leaf-sm border border-need/40 bg-need/[0.07] p-4">
+                  <p className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-need">
+                    <StatusShape shape="petal" tone="need" size={9} />
+                    {p.flags.length === 1 ? '1 thing to look at closely' : `${p.flags.length} things to look at closely`}
+                  </p>
+                  <ul className="space-y-1.5 text-[13.5px]">
+                    {p.flags.map((f) => (
+                      <li key={f.id}>{f.text}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-[12px] text-ink-3">Found automatically from the words and price. Check them yourself before you decide.</p>
+                </div>
+              )}
+              {stopped && (
+                <div className="mb-5 rounded-leaf-sm border border-line bg-raised p-4 text-[13.5px]">
+                  <p className="font-semibold">{sellerFirst} is stopped from listing</p>
+                  <p className="mt-1 text-ink-2">
+                    {stopped.reason} · {stopped.by} · {formatDate(stopped.at)}
+                  </p>
+                  <p className="mt-1 text-ink-3">Nothing of theirs goes back on sale until an owner lets them list again.</p>
+                  {isOwner && (
+                    <Button size="sm" className="mt-3" onClick={() => setSheet('allow')}>
+                      Let {sellerFirst} list again
+                    </Button>
+                  )}
+                </div>
+              )}
               <SectionTitle aside={open ? <span className="font-mono text-[12px] text-ink-3">{done} of {all}</span> : undefined}>
                 {open ? 'Check the listing' : 'Looked over'}
               </SectionTitle>
@@ -256,8 +337,16 @@ function Listing({ p }: { p: ProductDetail }) {
                             {on && <FiCheck className="h-3.5 w-3.5" strokeWidth={3} />}
                           </span>
                           <span className="min-w-0">
-                            <span className="block text-[14px] font-medium">{k.label}</span>
+                            <span className="block text-[14px] font-medium">
+                              {k.label}
+                              {flaggedChecks.has(k.id) && <span className="ml-2 text-[12px] font-semibold text-need">flagged</span>}
+                            </span>
                             <span className="mt-0.5 block text-[12.5px] text-ink-3">{k.hint(p)}</span>
+                            {p.guide.checks[k.id] && (
+                              <span className="mt-1 block text-[12.5px] text-ink-2">
+                                <span className="font-semibold">{p.category}:</span> {p.guide.checks[k.id]}
+                              </span>
+                            )}
                           </span>
                         </label>
                       </li>
@@ -274,25 +363,29 @@ function Listing({ p }: { p: ProductDetail }) {
                   </p>
                 ) : (
                   <>
-                    {open && (
-                      <>
+                    {open && !stopped && (
+                      <div>
                         <Button variant="primary" size="lg" className="w-full" disabled={done < all} busy={marking.isLoading} onClick={fine}>
                           {done < all ? `${clearLabel} · ${all - done} ${all - done === 1 ? 'check' : 'checks'} left` : clearLabel}
                         </Button>
+                        <p className="mt-1.5 text-[12.5px] text-ink-3">Then the next listing {reported ? 'buyers reported' : 'to look over'} opens.</p>
                         <ErrorNote>{fineError}</ErrorNote>
-                      </>
+                      </div>
                     )}
                     {p.visible && (
-                      <Button size="lg" className="w-full" onClick={() => setSheet('hide')}>
-                        Hide until {sellerFirst} fixes it
-                      </Button>
+                      <div>
+                        <Button size="lg" className="w-full" onClick={() => setSheet('hide')}>
+                          Hide until {sellerFirst} fixes it
+                        </Button>
+                        <p className="mt-1.5 text-[12.5px] text-ink-3">For things {sellerFirst} can put right, like wrong photos or details. It comes back here once fixed.</p>
+                      </div>
                     )}
-                    <Button variant="danger" size="lg" className="w-full" onClick={() => setSheet('remove')}>
-                      Remove from Dezenmart
-                    </Button>
-                    <p className="pt-1 text-[12.5px] text-ink-3">
-                      Hide a listing {sellerFirst} can correct: it comes back here when they fix it. Remove scams and things that cannot be sold here: that is for good, and buyers who already paid are refunded. Either way {sellerFirst} is told why.
-                    </p>
+                    <div>
+                      <Button variant="danger" size="lg" className="w-full" onClick={() => setSheet('remove')}>
+                        Remove from Dezenmart
+                      </Button>
+                      <p className="mt-1.5 text-[12.5px] text-ink-3">For scams and things that can’t be sold here. It’s for good, and buyers who already paid are refunded.</p>
+                    </div>
                   </>
                 )}
               </div>
@@ -304,31 +397,49 @@ function Listing({ p }: { p: ProductDetail }) {
       <ConfirmDialog
         open={sheet === 'hide'}
         title={`Hide ${p.name}`}
-        summary={`Buyers can no longer see or buy it. ${sellerFirst} is told the reason and can fix the listing; it comes back to “To review” before it goes on sale again.`}
+        summary={`Buyers can no longer see or buy it. ${sellerFirst} is told the reason and can fix the listing; it comes back to “To review” before it goes on sale again.${reported ? ` The ${p.reports === 1 ? 'buyer who reported it is' : `${p.reports} buyers who reported it are`} told it’s off sale.` : ''}`}
         actionLabel="Hide this listing"
         askReason
         reasonHint={`${sellerFirst} sees this, so say what to fix.`}
         danger
         onClose={() => setSheet(null)}
-        onConfirm={async (reason) => failureOf(await setVisible({ id: p.id, visible: false, reason }))}
+        onConfirm={async (reason) => {
+          const failure = failureOf(await setVisible({ id: p.id, visible: false, reason }));
+          if (!failure && p.needsLook) await goNext();
+          return failure;
+        }}
+      />
+      <ConfirmDialog
+        open={sheet === 'allow'}
+        title={`Let ${p.seller.name} list again`}
+        summary={`${sellerFirst} can list again. Their hidden listings stay hidden until someone looks at each one.`}
+        actionLabel={`Let ${sellerFirst} list again`}
+        askReason
+        reasonHint="Why. Only staff see this."
+        onClose={() => setSheet(null)}
+        onConfirm={async (reason) => failureOf(await allowSeller({ sellerId: p.seller.id, reason: reason ?? '' }))}
       />
       <ConfirmDialog
         open={sheet === 'keep'}
         title={`Keep ${p.name} on sale`}
-        summary={`${p.reports === 1 ? 'Its report is' : `Its ${p.reports} reports are`} cleared and it leaves the Reported list.`}
+        summary={`${p.reports === 1 ? 'Its report is' : `Its ${p.reports} reports are`} cleared and it leaves the Reported list. The ${p.reports === 1 ? 'buyer who reported it is' : 'buyers who reported it are'} told: “We checked it and it meets our rules, so it stays on sale.”`}
         actionLabel="Keep it on sale"
         askReason
         reasonHint="Why the reports did not hold up. Only staff see this."
         onClose={() => setSheet(null)}
         onConfirm={(note) => clear(note)}
       />
-      <RemoveSheet open={sheet === 'remove'} p={p} onClose={() => setSheet(null)} onDone={() => navigate('/shopping/products?status=removed')} />
+      <RemoveSheet open={sheet === 'remove'} p={p} suggested={suggestReason(p, ticked)} onClose={() => setSheet(null)} onDone={goNext} />
     </>
   );
 }
 
 function RemovedNotice({ p }: { p: ProductDetail }) {
   const r = p.removed!;
+  const can = useCan();
+  const [undoing, setUndoing] = useState(false);
+  const [restore] = useRestoreProductMutation();
+  const first = p.seller.name.split(' ')[0];
   return (
     <>
       <SectionTitle>Removed</SectionTitle>
@@ -336,6 +447,12 @@ function RemovedNotice({ p }: { p: ProductDetail }) {
         <p className="text-[13px] text-ink-2">
           By {r.by} on {formatDate(r.at)}. It is off Dezenmart for good.
         </p>
+        {r.stoppedSeller && (
+          <p className="text-[13px] text-ink-2">
+            {first} was also stopped from listing
+            {r.stoppedSeller.hiddenListings ? `, and ${r.stoppedSeller.hiddenListings} other ${r.stoppedSeller.hiddenListings === 1 ? 'listing was' : 'listings were'} hidden` : ''}.
+          </p>
+        )}
         <div>
           <p className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3">The notice {p.seller.name.split(' ')[0]} got</p>
           <SellerNotice product={p.name} reason={r.reason} message={r.message} />
@@ -349,7 +466,25 @@ function RemovedNotice({ p }: { p: ProductDetail }) {
             </p>
           )}
         </div>
+        {can('staff_admin', 'shopping') && (
+          <div className="border-t border-line pt-3">
+            <Button size="sm" onClick={() => setUndoing(true)}>
+              Undo this removal
+            </Button>
+            <p className="mt-1.5 text-[12.5px] text-ink-3">Owners only, for a removal that was wrong. It comes back hidden and is checked again before it goes on sale.</p>
+          </div>
+        )}
       </Card>
+      <ConfirmDialog
+        open={undoing}
+        title={`Undo the removal of ${p.name}`}
+        summary={`It comes back hidden and goes to “To review”, so someone checks it before it is on sale again. ${first} is told. Orders already on hold stay with the disputes.`}
+        actionLabel="Undo the removal"
+        askReason
+        reasonHint="Why the removal was wrong. Only staff see this."
+        onClose={() => setUndoing(false)}
+        onConfirm={async (reason) => failureOf(await restore({ id: p.id, reason: reason ?? '' }))}
+      />
     </>
   );
 }
@@ -369,20 +504,39 @@ function SellerNotice({ product, reason, message }: { product: string; reason: R
   );
 }
 
-function RemoveSheet({ open, p, onClose, onDone }: { open: boolean; p: ProductDetail; onClose: () => void; onDone: () => void }) {
+function RemoveSheet({
+  open,
+  p,
+  suggested,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  p: ProductDetail;
+  suggested: { reason: RemovalReason; why: string } | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const [reason, setReason] = useState<RemovalReason | null>(null);
   const [message, setMessage] = useState('');
   const [edited, setEdited] = useState(false);
   const [error, setError] = useState('');
+  const [stopSeller, setStopSeller] = useState(false);
   const [remove, removing] = useRemoveProductMutation();
   const first = p.seller.name.split(' ')[0];
+  const reported = p.reports > 0;
   useEffect(() => {
     if (open) {
-      setReason(null);
-      setMessage('');
+      // Start from what the flags or the unticked checks point at; staff can pick another.
+      setReason(suggested?.reason ?? null);
+      setMessage(suggested ? REMOVAL[suggested.reason].draft : '');
       setEdited(false);
       setError('');
+      // A seller with listings removed before is stopped by default; staff can untick it.
+      setStopSeller(p.seller.removedBefore > 0);
     }
+    // Only when the sheet opens: the suggestion must not overwrite a choice made inside it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const choose = (r: RemovalReason) => {
     setReason(r);
@@ -394,7 +548,7 @@ function RemoveSheet({ open, p, onClose, onDone }: { open: boolean; p: ProductDe
     e?.preventDefault();
     if (!ready || removing.isLoading) return;
     setError('');
-    const failure = failureOf(await remove({ id: p.id, reason: reason!, message: message.trim() }));
+    const failure = failureOf(await remove({ id: p.id, reason: reason!, message: message.trim(), stopSeller: stopSeller && !p.seller.stopped }));
     if (failure) setError(failure);
     else {
       onClose();
@@ -428,7 +582,9 @@ function RemoveSheet({ open, p, onClose, onDone }: { open: boolean; p: ProductDe
                 ? ` 1 paid order is put on hold and opened as a dispute, so the buyer is refunded instead of ${first} being paid.`
                 : ` ${p.openOrders} paid orders are put on hold and opened as disputes, so the buyers are refunded instead of ${first} being paid.`
               : ` ${p.openOrders} paid ${p.openOrders === 1 ? 'order goes' : 'orders go'} ahead as normal.`)}
+          {reported && ` The ${p.reports === 1 ? 'buyer who reported it is' : `${p.reports} buyers who reported it are`} told it was removed.`}
         </p>
+        {suggested && reason === suggested.reason && <p className="-mt-2 text-[12.5px] text-ink-3">{suggested.why} Change it if it’s not right.</p>}
         <fieldset>
           <legend className="mb-2 text-[13px] font-semibold">Why</legend>
           <div className="space-y-1.5">
@@ -463,6 +619,18 @@ function RemoveSheet({ open, p, onClose, onDone }: { open: boolean; p: ProductDe
             </div>
           </>
         )}
+        {!p.seller.stopped && (
+          <label className="flex cursor-pointer gap-3 rounded-leaf-sm border border-line p-3.5">
+            <input type="checkbox" className="mt-1 accent-[var(--ink)]" checked={stopSeller} onChange={(e) => setStopSeller(e.target.checked)} />
+            <span className="text-[14px]">
+              <span className="block font-semibold">Also stop {first} listing</span>
+              <span className="mt-0.5 block text-[13px] text-ink-2">
+                {p.seller.listed ? `Hides their ${p.seller.listed} other ${p.seller.listed === 1 ? 'listing' : 'listings'} and stops new ones` : 'Stops new listings'} until an owner lets them list again.
+                {p.seller.removedBefore > 0 && ` ${first} has had ${p.seller.removedBefore} ${p.seller.removedBefore === 1 ? 'listing' : 'listings'} removed before.`}
+              </span>
+            </span>
+          </label>
+        )}
         <ErrorNote>{error}</ErrorNote>
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
@@ -484,6 +652,7 @@ const DECISION_WORDS: Record<ProductDecision['kind'], string> = {
   hidden: 'Hidden',
   shown: 'Put back on sale',
   removed: 'Removed',
+  restored: 'Removal undone by an owner',
 };
 
 /**
@@ -521,6 +690,11 @@ function History({ history, now }: { history: ProductDecision[]; now: ProductDet
                   </span>
                 </p>
                 {d.note && <p className="mt-1 max-w-[62ch] text-[13.5px] text-ink-2">“{d.note}”</p>}
+                {d.told && (
+                  <p className="mt-1 max-w-[62ch] text-[12.5px] text-ink-3">
+                    Told the {d.told.count === 1 ? 'buyer' : `${d.told.count} buyers`} who reported it: “{d.told.message}”
+                  </p>
+                )}
                 <details className="mt-2" open={i === 0 && differs.length > 0}>
                   <summary className="cursor-pointer text-[13px] text-ink-2 hover:text-ink">
                     What it looked like then{differs.length ? ` · ${differs.length} ${differs.length === 1 ? 'thing has' : 'things have'} changed since` : ' · same as now'}

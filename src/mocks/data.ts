@@ -54,8 +54,17 @@ export interface SamplePerson extends PersonSummary {
   accountNumber: string;
 }
 
+// Every sample person has their own name, so two different sellers never look like one.
+const usedNames = new Set<string>();
+const uniqueName = () => {
+  let n = name();
+  while (usedNames.has(n)) n = name();
+  usedNames.add(n);
+  return n;
+};
+
 export const people: SamplePerson[] = Array.from({ length: 48 }, (_, i) => {
-  const full = name();
+  const full = uniqueName();
   const email = emailOf(full, i + 1);
   const phone = `+23480${String(int(10_000_000, 99_999_999))}`;
   const [lga, state] = pick(AREAS);
@@ -278,7 +287,7 @@ export const NGN_PER: Record<string, number> = { cUSD: 1560, USDT: 1560, USDC: 1
 export const toNgn = (amount: number, currency: string) => (currency === 'NGN' ? amount : Math.round(amount * (NGN_PER[currency] ?? 0)));
 
 /** Stored listings. Whether one needs a look is worked out when it is read. */
-export const products: Omit<Product, 'needsLook'>[] = GOODS.map(([n, price, category], i) => {
+export const products: Omit<Product, 'needsLook' | 'flags'>[] = GOODS.map(([n, price, category], i) => {
   const seller = sellerPeople[i % sellerPeople.length];
   const currency = pick(['cUSD', 'USDT']);
   return {

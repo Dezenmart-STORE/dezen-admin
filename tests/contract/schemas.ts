@@ -237,13 +237,28 @@ export const product = z.object({
   reviewedAt: iso.optional(),
   reviewedBy: z.string().optional(),
   removed: z
-    .object({ reason: z.enum(['scam', 'not_allowed', 'misleading', 'photos', 'other']), message: z.string().min(20), by: z.string(), at: iso, heldOrders: z.number().int().nonnegative() })
+    .object({
+      reason: z.enum(['scam', 'not_allowed', 'misleading', 'photos', 'other']),
+      message: z.string().min(20),
+      by: z.string(),
+      at: iso,
+      heldOrders: z.number().int().nonnegative(),
+      stoppedSeller: z.object({ hiddenListings: z.number().int().nonnegative() }).optional(),
+    })
     .optional(),
   hidden: z.object({ reason: z.string().min(3), by: z.string(), at: iso }).optional(),
   changedAt: iso.optional(),
   changes: z.array(z.string()).optional(),
   fixedAt: iso.optional(),
   needsLook: z.boolean(),
+  flags: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string().min(3),
+      check: z.enum(['photos', 'details', 'price', 'allowed', 'brand']),
+      reason: z.enum(['scam', 'not_allowed', 'misleading', 'photos', 'other']),
+    }),
+  ),
 });
 const snapshot = z.object({ name: z.string(), category: z.string(), price: z.number(), currency: z.string(), priceNgn: z.number(), stock: z.number(), description: z.string(), photos: z.number().int().nonnegative() });
 export const productDetail = product.extend({
@@ -252,11 +267,12 @@ export const productDetail = product.extend({
   openOrders: z.number().int().nonnegative(),
   history: z.array(
     z.object({
-      kind: z.enum(['looked_over', 'kept', 'hidden', 'shown', 'removed']),
+      kind: z.enum(['looked_over', 'kept', 'hidden', 'shown', 'removed', 'restored']),
       by: z.string(),
       at: iso,
       note: z.string().optional(),
       checks: z.array(z.string()).optional(),
+      told: z.object({ count: z.number().int().positive(), message: z.string().min(10) }).optional(),
       snapshot,
     }),
   ),
@@ -268,6 +284,11 @@ export const productDetail = product.extend({
     removedBefore: z.number().int().nonnegative(),
     ordersCompleted: z.number().int().nonnegative(),
     disputes: z.number().int().nonnegative(),
+    stopped: z.object({ reason: z.string(), by: z.string(), at: iso }).optional(),
+  }),
+  guide: z.object({
+    checks: z.record(z.string()),
+    price: z.object({ item: z.string(), low: z.number().positive(), high: z.number().positive() }).optional(),
   }),
 });
 export const categories = z.array(z.object({ name: z.string().min(1), count: z.number().int().positive() }));

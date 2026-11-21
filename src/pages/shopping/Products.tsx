@@ -16,7 +16,7 @@ import { REMOVAL } from './ProductReview';
 /** Each view's own order, said the way staff would, used when they have not picked one. */
 const DEFAULT_ORDER: Record<string, string> = {
   reported: 'Waiting longest',
-  review: 'Oldest first',
+  review: 'Riskiest first',
   removed: 'Newest removed',
   hidden: 'Newest listed',
   '': 'Newest listed',
@@ -29,6 +29,7 @@ const SORTS: { value: string; label: string; only?: string }[] = [
   { value: 'stock_desc', label: 'Most in stock' },
   { value: 'stock_asc', label: 'Fewest in stock' },
   { value: 'most_reported', label: 'Most reports', only: 'reported' },
+  { value: 'risk', label: 'Most flags first' },
 ];
 
 export function Products() {
@@ -172,7 +173,11 @@ export function Products() {
         settledWhenEmpty={!category && !list.q && (list.status === 'reported' || list.status === 'review')}
         mobile={(p) => ({
           title: p.name,
-          subtitle: p.removed ? `${p.seller.name} · ${REMOVAL[p.removed.reason].label}` : `${p.seller.name} · ${p.category}`,
+          subtitle: p.removed
+            ? `${p.seller.name} · ${REMOVAL[p.removed.reason].label}`
+            : p.flags.length
+              ? `${p.flags.length === 1 ? '1 flag' : `${p.flags.length} flags`} · ${p.seller.name}`
+              : `${p.seller.name} · ${p.category}`,
           amount: <Money amount={p.price} currency={p.currency} ngn={p.priceNgn} />,
           status: shown(p),
         })}
@@ -187,6 +192,12 @@ export function Products() {
                 <p className="text-[12.5px] text-ink-3">
                   {p.category} · {p.seller.name}
                 </p>
+                {p.flags.length > 0 && (
+                  <p className="mt-1.5 max-w-[48ch] text-[12.5px] text-need">
+                    <span className="font-semibold">{p.flags.length === 1 ? 'Flagged:' : `${p.flags.length} flags:`}</span> {p.flags[0].text}
+                    {p.flags.length > 1 && ', and more'}
+                  </p>
+                )}
                 {p.reports > 0 && (
                   <div className="mt-2 max-w-[48ch] space-y-1 border-l-2 border-need/50 pl-3">
                     <p className="text-[12px] font-semibold text-need">

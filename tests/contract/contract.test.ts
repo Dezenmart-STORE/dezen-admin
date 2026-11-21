@@ -117,6 +117,21 @@ describe('reads: every screen gets the shape it expects', { timeout: 30_000 }, (
       for (let i = 1; i < p.items.length; i++) expect(Math.sign(p.items[i].priceNgn - p.items[i - 1].priceNgn) * dir).toBeGreaterThanOrEqual(0);
     }
   });
+  it('To review puts flagged listings first, and flags point at a check', async () => {
+    const p = await read('/admin/shopping/products?status=review', S.page(S.product));
+    const counts = p.items.map((x) => x.flags.length);
+    for (let i = 1; i < counts.length; i++) expect(counts[i]).toBeLessThanOrEqual(counts[i - 1]);
+  });
+  // Sample data only: the real catalogue has no such listing to look for.
+  writes('a listing with a phone number and a price far below the usual is flagged', async () => {
+    const p = await read('/admin/shopping/products?q=iPhone', S.page(S.product));
+    const ids = p.items[0]?.flags.map((f) => f.id) ?? [];
+    expect(ids).toContain('contact');
+    expect(ids).toContain('price');
+    const d = await read(`/admin/shopping/products/${p.items[0].id}`, S.productDetail);
+    expect(d.guide.price?.low).toBeGreaterThan(d.priceNgn);
+  });
+
   it('sellers', () => read('/admin/shopping/sellers', S.page(S.seller)));
   it('people and one person with where they stand', async () => {
     const id = await firstId('/admin/platform/users', S.person);
@@ -205,6 +220,35 @@ describe('rules the backend must keep (sample backend only)', { timeout: 30_000 
     const d = await read(`/admin/shopping/products/${id}`, S.productDetail);
     expect(d.history[0].kind).toBe('hidden');
     expect(d.history[0].snapshot.name).toBe(d.name);
+  });
+
+  writes('removing can stop the seller, which hides their other listings; an owner can undo both', async () => {
+    const p = await read('/admin/shopping/products?q=handbag', S.page(S.product));
+    const id = p.items[0].id;
+    const before = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    const r = await call('POST', `/admin/shopping/products/${id}/remove`, { reason: 'not_allowed', message: 'Copies of designer bags cannot be sold.', stopSeller: true });
+    expect(r.status).toBe(200);
+    const after = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    expect(after.removed?.stoppedSeller?.hiddenListings).toBe(before.seller.listed);
+    expect(after.seller.stopped).toBeDefined();
+    // Nothing of a stopped seller's goes back on sale.
+    const other = (await read('/admin/shopping/products?status=hidden', S.page(S.product))).items.find((x) => x.seller.id === before.seller.id);
+    if (other) expect((await call('POST', `/admin/shopping/products/${other.id}/reviewed`, { checks: ['photos', 'details', 'price', 'allowed', 'brand'] })).status).toBe(409);
+    expect((await call('POST', `/admin/shopping/sellers/${before.seller.id}/allow`, { reason: 'Spoke to them' })).status).toBe(200);
+    expect((await call('POST', `/admin/shopping/products/${id}/restore`, { reason: 'Wrong call' })).status).toBe(200);
+    const restored = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    expect(restored.removed).toBeUndefined();
+    expect(restored.visible).toBe(false);
+    expect(restored.needsLook).toBe(true);
+    expect(restored.history[0].kind).toBe('restored');
+  });
+
+  writes('buyers who reported a listing are told the outcome', async () => {
+    const id = await firstId('/admin/shopping/products?status=reported', S.product);
+    if (!id) return;
+    await call('POST', `/admin/shopping/products/${id}/hide`, { reason: 'Use photos of the real item.' });
+    const d = await read(`/admin/shopping/products/${id}`, S.productDetail);
+    expect(d.history[0].told?.count).toBeGreaterThan(0);
   });
 
   writes('an owner cannot be removed', async () => {
